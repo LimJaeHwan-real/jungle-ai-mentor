@@ -1,12 +1,11 @@
 import { FormEvent, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { Bot, ExternalLink, GitBranch, RefreshCw, Search, Send, UploadCloud } from 'lucide-react';
+import { Bot, ExternalLink, RefreshCw, Search, Send, UploadCloud } from 'lucide-react';
 import { api, getErrorMessage } from '../api';
 import { AiAnswer, Faq } from '../types';
 
 export function AskPage() {
   const [question, setQuestion] = useState('');
-  const [repositoryUrl, setRepositoryUrl] = useState('');
   const [autoBlogSearch, setAutoBlogSearch] = useState(true);
   const [answer, setAnswer] = useState<AiAnswer | undefined>();
   const [publishMessage, setPublishMessage] = useState('');
@@ -17,7 +16,6 @@ export function AskPage() {
       (
         await api.post<AiAnswer>('/ai/ask', {
           question,
-          repositoryUrl: repositoryUrl || undefined,
           autoBlogSearch,
         })
       ).data,
@@ -28,22 +26,29 @@ export function AskPage() {
   });
 
   const publishMutation = useMutation({
-    mutationFn: async () => (await api.post<Faq>(`/ai/questions/${answer?.id}/publish`, { title: question, category: answer?.agentRoute })).data,
+    mutationFn: async () =>
+      (
+        await api.post<Faq>(`/ai/questions/${answer?.id}/publish`, {
+          title: question,
+          category: answer?.agentRoute,
+        })
+      ).data,
     onSuccess(data) {
       setPublishMessage(`FAQ로 공개했습니다: ${data.title}`);
     },
   });
 
   const syncBlogsMutation = useMutation({
-    mutationFn: async () => (await api.post('/admin/blogs/sync', { maxResultsPerQuery: 3 })).data as {
-      createdCount?: number;
-      updatedCount?: number;
-      skippedCount?: number;
-      failedCount?: number;
-    },
+    mutationFn: async () =>
+      (await api.post('/admin/blogs/sync', { maxResultsPerQuery: 3 })).data as {
+        createdCount?: number;
+        updatedCount?: number;
+        skippedCount?: number;
+        failedCount?: number;
+      },
     onSuccess(data) {
       setSyncMessage(
-        `인덱싱 완료: 새 글 ${data.createdCount ?? 0}개, 업데이트 ${data.updatedCount ?? 0}개, 유지 ${data.skippedCount ?? 0}개`,
+        `인덱싱 완료: 새 글 ${data.createdCount ?? 0}개, 업데이트 ${data.updatedCount ?? 0}개, 유지 ${data.skippedCount ?? 0}개, 실패 ${data.failedCount ?? 0}개`,
       );
     },
   });
@@ -63,20 +68,19 @@ export function AskPage() {
         <form className="stack-form" onSubmit={onSubmit}>
           <label>
             질문
-            <textarea value={question} onChange={(event) => setQuestion(event.target.value)} rows={8} required placeholder="정글 학습, FAQ, 저장소 분석 질문을 입력하세요." />
-          </label>
-          <label>
-            GitHub 저장소 URL
-            <div className="input-with-icon">
-              <GitBranch size={17} />
-              <input value={repositoryUrl} onChange={(event) => setRepositoryUrl(event.target.value)} placeholder="https://github.com/owner/repo" />
-            </div>
+            <textarea
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              rows={8}
+              required
+              placeholder="정글 학습, FAQ, 블로그 근거 기반 질문을 입력하세요."
+            />
           </label>
           <label className="checkbox-row">
             <input type="checkbox" checked={autoBlogSearch} onChange={(event) => setAutoBlogSearch(event.target.checked)} />
             <span>
               <strong>근거 부족 시 블로그 검색 보강</strong>
-              <small>기본은 저장된 pgvector를 빠르게 검색하고, 근거가 없을 때만 실시간 검색합니다.</small>
+              <small>기본은 저장된 pgvector를 빠르게 검색하고, 근거가 없을 때만 실시간 검색을 보강합니다.</small>
             </span>
           </label>
           <button className="secondary-button" type="button" disabled={syncBlogsMutation.isPending} onClick={() => syncBlogsMutation.mutate()}>
@@ -86,7 +90,7 @@ export function AskPage() {
           {syncMessage && <p className="success-text">{syncMessage}</p>}
           {askMutation.error && <p className="error-text">{getErrorMessage(askMutation.error)}</p>}
           <button className="primary-button" type="submit" disabled={askMutation.isPending}>
-            <Send size={17} /> {askMutation.isPending ? '블로그 검색과 답변 생성 중' : '질문하기'}
+            <Send size={17} /> {askMutation.isPending ? '근거 검색과 답변 생성 중' : '질문하기'}
           </button>
         </form>
       </section>
@@ -98,7 +102,9 @@ export function AskPage() {
             <div className="tool-row">
               <span className="route-badge">{answer.agentRoute}</span>
               {answer.usedTools.map((tool) => (
-                <span className="tag-pill" key={tool}>{tool}</span>
+                <span className="tag-pill" key={tool}>
+                  {tool}
+                </span>
               ))}
             </div>
             <pre className="answer-box">{answer.answer}</pre>
@@ -139,7 +145,7 @@ export function AskPage() {
             {publishMessage && <p className="success-text">{publishMessage}</p>}
           </>
         ) : (
-          <p className="muted-line">질문을 보내면 Agent 경로, 사용 도구, 참고 근거가 이곳에 표시됩니다.</p>
+          <p className="muted-line">질문을 보내면 Agent 경로, 사용 도구, 참고 근거가 여기에 표시됩니다.</p>
         )}
       </section>
     </div>

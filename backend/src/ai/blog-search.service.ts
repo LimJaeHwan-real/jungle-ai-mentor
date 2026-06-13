@@ -1,6 +1,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RagService } from './rag.service';
+import { extractGithubRepositoryUrls } from './utils/github-url';
 
 interface BlogCandidate {
   title: string;
@@ -51,7 +52,7 @@ export class BlogSearchService implements OnModuleInit, OnModuleDestroy {
   }
 
   async discoverAndImport(question: string) {
-    const mode = this.config.get<string>('BLOG_SEARCH_MODE') ?? 'duckduckgo';
+    const mode = this.config.get<string>('BLOG_SEARCH_MODE') ?? 'hybrid';
     if (mode === 'off') {
       return {
         mode,
@@ -137,9 +138,17 @@ export class BlogSearchService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async search(query: string, maxResults: number): Promise<BlogCandidate[]> {
-    const mode = this.config.get<string>('BLOG_SEARCH_MODE') ?? 'duckduckgo';
+    const mode = this.config.get<string>('BLOG_SEARCH_MODE') ?? 'hybrid';
     const naverClientId = this.config.get<string>('NAVER_CLIENT_ID');
     const naverClientSecret = this.config.get<string>('NAVER_CLIENT_SECRET');
+
+    if (mode === 'hybrid') {
+      const [naverResults, duckDuckGoResults] = await Promise.all([
+        naverClientId && naverClientSecret ? this.searchNaverBlogs(query, maxResults, naverClientId, naverClientSecret) : Promise.resolve([]),
+        this.searchDuckDuckGo(query, maxResults),
+      ]);
+      return this.dedupeCandidates([...naverResults, ...duckDuckGoResults], maxResults);
+    }
 
     if (mode === 'naver_api' && naverClientId && naverClientSecret) {
       const naverResults = await this.searchNaverBlogs(query, maxResults, naverClientId, naverClientSecret);
@@ -147,6 +156,21 @@ export class BlogSearchService implements OnModuleInit, OnModuleDestroy {
     }
 
     return this.searchDuckDuckGo(query, maxResults);
+  }
+
+  private dedupeCandidates(candidates: BlogCandidate[], limit: number) {
+    const seen = new Set<string>();
+    const unique: BlogCandidate[] = [];
+
+    for (const candidate of candidates) {
+      const sourceUrl = this.normalizeUrl(candidate.url);
+      if (!sourceUrl || seen.has(sourceUrl)) continue;
+      seen.add(sourceUrl);
+      unique.push({ ...candidate, url: sourceUrl });
+      if (unique.length >= limit) break;
+    }
+
+    return unique;
   }
 
   private async importCandidates(candidates: BlogCandidate[], maxResults: number): Promise<BlogImportReference[]> {
@@ -181,9 +205,10 @@ export class BlogSearchService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
+      const content = this.appendGithubRepositoryUrls(article.content, article.githubRepositoryUrls);
       const document = await this.rag.indexDocument({
         title: article.title || candidate.title,
-        content: article.content,
+        content,
         category: 'BLOG',
         sourceType: 'BLOG_SEARCH',
         sourceUrl,
@@ -281,11 +306,19 @@ export class BlogSearchService implements OnModuleInit, OnModuleDestroy {
     const firstHtml = await this.fetchHtml(sourceUrl);
     const frameUrl = this.extractNaverFrameUrl(firstHtml, sourceUrl);
     const html = frameUrl ? await this.fetchHtml(frameUrl) : firstHtml;
+    const content = this.extractReadableText(html);
+    const githubRepositoryUrls = extractGithubRepositoryUrls(`${html}\n${content}\n${fallbackTitle}`);
 
     return {
       title: this.extractTitle(html) || fallbackTitle,
-      content: this.extractReadableText(html),
+      content,
+      githubRepositoryUrls,
     };
+  }
+
+  private appendGithubRepositoryUrls(content: string, urls: string[]) {
+    if (urls.length === 0) return content;
+    return `${content}\n\n관련 GitHub 저장소:\n${urls.map((url) => `- ${url}`).join('\n')}`;
   }
 
   private async fetchHtml(url: string) {
