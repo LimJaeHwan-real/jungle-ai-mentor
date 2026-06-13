@@ -13,7 +13,6 @@ import { KnowledgeDocument } from './ai/entities/knowledge-document.entity';
 import { AiQuestion } from './ai/entities/ai-question.entity';
 import { Faq } from './ai/entities/faq.entity';
 import { AppController } from './app.controller';
-import { MoviesModule } from './movies/movies.module';
 
 @Module({
   imports: [
@@ -46,7 +45,6 @@ import { MoviesModule } from './movies/movies.module';
     AuthModule,
     PostsModule,
     AiModule,
-    MoviesModule,
   ],
   controllers: [AppController],
 })
