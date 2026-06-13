@@ -1,0 +1,14 @@
+{
+  "name": "jungle-ai-mentor",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Jungle AI mentor community board MVP",
+  "scripts": {
+    "install:all": "npm.cmd --prefix backend install && npm.cmd --prefix frontend install",
+    "build": "npm.cmd --prefix backend run build && npm.cmd --prefix frontend run build",
+    "test": "npm.cmd --prefix backend run test",
+    "dev:backend": "npm.cmd --prefix backend run start:dev",
+    "dev:frontend": "npm.cmd --prefix frontend run dev"
+  }
+}
+
