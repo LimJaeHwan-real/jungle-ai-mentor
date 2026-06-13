@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
+import { RagService } from '../ai/rag.service';
 import { User } from '../users/user.entity';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { CreatePostDto } from './dto/create-post.dto';
@@ -18,6 +19,7 @@ export class PostsService {
     @InjectRepository(Post) private readonly posts: Repository<Post>,
     @InjectRepository(Comment) private readonly comments: Repository<Comment>,
     @InjectRepository(Tag) private readonly tags: Repository<Tag>,
+    private readonly rag: RagService,
   ) {}
 
   async createPost(user: User, dto: CreatePostDto) {
@@ -32,6 +34,7 @@ export class PostsService {
         tags,
       }),
     );
+    await this.indexPostForRag(post.id);
     return this.getPost(post.id, false);
   }
 
@@ -108,6 +111,7 @@ export class PostsService {
     if (dto.tags !== undefined) post.tags = await this.resolveTags(dto.tags);
 
     await this.posts.save(post);
+    await this.indexPostForRag(post.id);
     return this.getPost(id, false);
   }
 
@@ -236,6 +240,38 @@ export class PostsService {
       createdAt: post.createdAt,
       updatedAt: post.updatedAt,
     };
+  }
+
+  private async indexPostForRag(postId: string) {
+    const post = await this.posts.findOne({
+      where: { id: postId },
+      relations: {
+        user: true,
+        tags: true,
+      },
+    });
+    if (!post) return;
+
+    const tags = post.tags?.map((tag) => tag.name) ?? [];
+    const content = [
+      `게시글 제목: ${post.title}`,
+      `작성자: ${post.user?.nickname ?? '알 수 없음'}`,
+      `게시글 유형: ${post.type}`,
+      `카테고리: ${post.category}`,
+      tags.length ? `태그: ${tags.map((tag) => `#${tag}`).join(', ')}` : '',
+      '',
+      post.content,
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    await this.rag.indexDocument({
+      title: `[게시판] ${post.title}`,
+      content,
+      category: 'BOARD_POST',
+      sourceType: 'BOARD_POST',
+      sourceUrl: `app://posts/${post.id}`,
+    });
   }
 
   private serializeComment(comment: Comment) {

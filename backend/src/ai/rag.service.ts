@@ -102,7 +102,7 @@ export class RagService {
     const vector = this.embeddings.toSqlVector(embedding);
 
     try {
-      const rows = await this.chunks.query(
+      const rows = (await this.chunks.query(
         `
         SELECT
           c.id AS "chunkId",
@@ -119,19 +119,24 @@ export class RagService {
         LIMIT $2
         `,
         [vector, limit],
-      );
-      return rows;
+      )) as RagSearchResult[];
+      const boardRows = await this.lexicalSearch(question, limit, 'BOARD_POST');
+      return this.mergeSearchResults(rows, boardRows, limit);
     } catch {
-      return this.lexicalFallback(question, limit);
+      return this.lexicalSearch(question, limit);
     }
   }
 
-  private async lexicalFallback(question: string, limit: number): Promise<RagSearchResult[]> {
-    const chunks = await this.chunks.find({
-      relations: { document: true },
-      order: { createdAt: 'DESC' },
-      take: 100,
-    });
+  private async lexicalSearch(question: string, limit: number, category?: string): Promise<RagSearchResult[]> {
+    const qb = this.chunks
+      .createQueryBuilder('chunk')
+      .leftJoinAndSelect('chunk.document', 'document')
+      .orderBy('chunk.createdAt', 'DESC')
+      .take(150);
+    if (category) {
+      qb.andWhere('document.category = :category', { category });
+    }
+    const chunks = await qb.getMany();
     const terms = new Set(
       question
         .toLowerCase()
@@ -154,8 +159,20 @@ export class RagService {
           score: hits / Math.max(terms.size, 1),
         };
       })
+      .filter((result) => result.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
+  }
+
+  private mergeSearchResults(vectorRows: RagSearchResult[], lexicalRows: RagSearchResult[], limit: number) {
+    const results = new Map<string, RagSearchResult>();
+    for (const row of [...vectorRows, ...lexicalRows]) {
+      const existing = results.get(row.chunkId);
+      if (!existing || row.score > existing.score) {
+        results.set(row.chunkId, row);
+      }
+    }
+    return [...results.values()].sort((a, b) => b.score - a.score).slice(0, limit);
   }
 
   private splitText(content: string) {
