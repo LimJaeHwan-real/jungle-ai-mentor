@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>말로설정 전략캔버스</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #5c6773;
+      --line: #d7dde3;
+      --panel: #f7f9fb;
+      --accent: #0f766e;
+      --voice: #2563eb;
+      --apple: #7c3aed;
+      --louie: #d97706;
+      --malro: #0f766e;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+      color: var(--ink);
+      background: #ffffff;
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 56px;
+    }
+
+    header {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+      line-height: 1.65;
+      color: var(--muted);
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 24px 0 28px;
+    }
+
+    .summary article,
+    .section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .summary article {
+      padding: 14px;
+    }
+
+    .summary strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    .summary span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .section {
+      padding: 20px;
+      margin-top: 18px;
+    }
+
+    .chart-wrap {
+      position: relative;
+      overflow-x: auto;
+      padding-bottom: 8px;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      min-width: 920px;
+      height: auto;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 18px;
+      margin-bottom: 14px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .tooltip {
+      position: absolute;
+      display: none;
+      width: 260px;
+      padding: 12px 13px;
+      border: 1px solid #cbd5df;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.98);
+      box-shadow: 0 14px 32px rgba(21, 31, 44, 0.16);
+      pointer-events: none;
+      z-index: 4;
+    }
+
+    .tooltip strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    .tooltip .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 5px 0;
+      border-top: 1px solid #eef2f5;
+      font-size: 13px;
+    }
+
+    .tooltip .row:first-of-type {
+      border-top: 0;
+    }
+
+    .tooltip .name {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--ink);
+    }
+
+    .tooltip .score {
+      font-variant-numeric: tabular-nums;
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 11px 10px;
+      border-bottom: 1px solid #e7ebef;
+      text-align: left;
+      vertical-align: top;
+      line-height: 1.55;
+    }
+
+    th {
+      color: #334155;
+      background: var(--panel);
+      font-weight: 700;
+    }
+
+    .score-note {
+      margin-top: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .sources {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      margin-top: 14px;
+      font-size: 13px;
+    }
+
+    .sources a {
+      color: #1d4ed8;
+      text-decoration: none;
+    }
+
+    .sources a:hover {
+      text-decoration: underline;
+    }
+
+    @media (max-width: 760px) {
+      main {
+        width: min(100% - 20px, 1180px);
+        padding-top: 22px;
+      }
+
+      .summary {
+        grid-template-columns: 1fr;
+      }
+
+      .section {
+        padding: 14px;
+      }
+
+      table {
+        min-width: 760px;
+      }
+
+      .table-scroll {
+        overflow-x: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>말로설정 전략캔버스</h1>
+      <p>한국어로 앱 내부의 깊은 설정을 찾아가고, 위험한 조작은 확인받는 Android 음성 조작 가이드 앱을 기준으로 4개 서비스를 비교했다. 점수는 1점 낮음, 5점 높음이며, 그래프의 각 카테고리에 마우스를 올리면 4개 앱 점수가 한눈에 표시된다.</p>
+    </header>
+
+    <section class="summary" aria-label="비교 서비스 요약">
+      <article>
+        <strong>말로설정</strong>
+        <span>국내 앱 레시피, 한국어 자연어, 위험도 확인, 고령층 UX를 핵심으로 둔 제안 서비스.</span>
+      </article>
+      <article>
+        <strong>Android Voice Access</strong>
+        <span>Android 화면을 음성으로 탐색하고 앱 열기, 탭, 텍스트 편집을 수행하는 접근성 도구.</span>
+      </article>
+      <article>
+        <strong>Apple Voice Control</strong>
+        <span>iOS/iPadOS에서 말로 탭, 스와이프, 번호/그리드 오버레이 조작을 제공하는 접근성 기능.</span>
+      </article>
+      <article>
+        <strong>Louie Voice</strong>
+        <span>시각장애인 중심의 앱 음성 조작 경험을 지향하는 Android 기반 보조 서비스.</span>
+      </article>
+    </section>
+
+    <section class="section">
+      <h2>전략캔버스</h2>
+      <div class="legend" id="legend"></div>
+      <div class="chart-wrap" id="chartWrap">
+        <svg id="canvas" viewBox="0 0 1080 520" role="img" aria-label="말로설정, Android Voice Access, Apple Voice Control, Louie Voice 전략캔버스"></svg>
+        <div class="tooltip" id="tooltip"></div>
+      </div>
+      <p class="score-note">카테고리 설계: 원문 기획서의 차별점인 한국어 특화, 국내 앱 특화, 안전한 자동화, 고령층 친화 UX에 범용 조작성, 앱 내부 설정 깊이, 보호자/로그, 구현 접근성을 더했다.</p>
+    </section>
+
+    <section class="section">
+      <h2>점수표</h2>
+      <div class="table-scroll">
+        <table id="scoreTable">
+          <thead>
+            <tr>
+              <th>카테고리</th>
+              <th>말로설정</th>
+              <th>Android Voice Access</th>
+              <th>Apple Voice Control</th>
+              <th>Louie Voice</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>해석</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>전략 포인트</th>
+              <th>의미</th>
+              <th>말로설정의 선택</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>범용 화면 조작보다 앱 설정 레시피</td>
+              <td>Voice Access와 Voice Control은 화면 조작 능력이 강하지만, 국내 앱의 깊은 설정 목적지까지 안내하는 제품은 아니다.</td>
+              <td>카카오톡, 네이버, 쿠팡, 병원/교통/공공앱 등 사용 빈도가 높은 설정 경로를 검증된 레시피로 축적한다.</td>
+            </tr>
+            <tr>
+              <td>완전 자동화보다 설명 가능한 자동화</td>
+              <td>고령층에게는 "알아서 누르는 앱"보다 "지금 무엇을 하는지 말해주는 앱"이 더 신뢰를 준다.</td>
+              <td>낮은 위험도는 빠르게 실행하고, 알림/권한/계정 관련 작업은 음성 확인과 로그를 남긴다.</td>
+            </tr>
+            <tr>
+              <td>한국어 자연어와 국내 앱 맥락</td>
+              <td>"카톡 글씨 크게", "쿠팡 알림 줄여줘"처럼 별칭과 생활어를 이해해야 차별화된다.</td>
+              <td>한국어 명령 사전, 앱 별칭, 가족이 등록한 반복 레시피를 MVP의 핵심 데이터로 둔다.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>조사 출처</h2>
+      <p>공식 문서와 서비스 페이지를 우선 참고했다. 점수는 공개 기능 설명을 바탕으로 한 전략적 추정치다.</p>
+      <div class="sources">
+        <a href="https://support.google.com/accessibility/android/answer/6151848?hl=en">Google Voice Access 도움말</a>
+        <a href="https://support.apple.com/en-us/111778">Apple Voice Control 지원 문서</a>
+        <a href="https://louievoice.com/">Louie Voice 공식 사이트</a>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const categories = [
+      "한국어 자연어",
+      "국내 앱 특화",
+      "범용 화면 조작",
+      "앱 내부 설정 깊이",
+      "안전 확인/위험도",
+      "고령층 친화 UX",
+      "보호자/로그",
+      "구현 접근성"
+    ];
+
+    const apps = [
+      {
+        name: "말로설정",
+        color: "#0f766e",
+        scores: [5, 5, 3, 5, 5, 5, 4, 4]
+      },
+      {
+        name: "Android Voice Access",
+        color: "#2563eb",
+        scores: [2, 1, 5, 2, 2, 3, 1, 5]
+      },
+      {
+        name: "Apple Voice Control",
+        color: "#7c3aed",
+        scores: [2, 1, 5, 2, 3, 4, 1, 2]
+      },
+      {
+        name: "Louie Voice",
+        color: "#d97706",
+        scores: [2, 1, 4, 3, 2, 4, 1, 3]
+      }
+    ];
+
+    const svg = document.getElementById("canvas");
+    const chartWrap = document.getElementById("chartWrap");
+    const tooltip = document.getElementById("tooltip");
+    const width = 1080;
+    const height = 520;
+    const pad = { top: 28, right: 30, bottom: 116, left: 72 };
+    const chartW = width - pad.left - pad.right;
+    const chartH = height - pad.top - pad.bottom;
+    const xStep = chartW / (categories.length - 1);
+    const yScale = score => pad.top + chartH - ((score - 1) / 4) * chartH;
+    const xScale = index => pad.left + index * xStep;
+
+    function el(name, attrs = {}) {
+      const node = document.createElementNS("http://www.w3.org/2000/svg", name);
+      Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+      return node;
+    }
+
+    function drawGrid() {
+      for (let score = 1; score <= 5; score += 1) {
+        const y = yScale(score);
+        svg.appendChild(el("line", {
+          x1: pad.left,
+          y1: y,
+          x2: width - pad.right,
+          y2: y,
+          stroke: score === 1 ? "#aeb8c3" : "#e2e8f0",
+          "stroke-width": score === 1 ? 1.4 : 1
+        }));
+        const label = el("text", {
+          x: pad.left - 18,
+          y: y + 4,
+          "text-anchor": "end",
+          "font-size": "13",
+          fill: "#64748b"
+        });
+        label.textContent = score;
+        svg.appendChild(label);
+      }
+
+      categories.forEach((category, index) => {
+        const x = xScale(index);
+        svg.appendChild(el("line", {
+          x1: x,
+          y1: pad.top,
+          x2: x,
+          y2: pad.top + chartH,
+          stroke: "#edf2f7",
+          "stroke-width": 1
+        }));
+
+        const label = el("text", {
+          x,
+          y: height - 86,
+          "text-anchor": "middle",
+          "font-size": "13",
+          fill: "#334155"
+        });
+        const words = category.split(" ");
+        words.forEach((word, wordIndex) => {
+          const tspan = el("tspan", {
+            x,
+            dy: wordIndex === 0 ? 0 : 17
+          });
+          tspan.textContent = word;
+          label.appendChild(tspan);
+        });
+        svg.appendChild(label);
+      });
+    }
+
+    function drawSeries() {
+      apps.forEach(app => {
+        const points = app.scores.map((score, index) => `${xScale(index)},${yScale(score)}`).join(" ");
+        svg.appendChild(el("polyline", {
+          points,
+          fill: "none",
+          stroke: app.color,
+          "stroke-width": 3,
+          "stroke-linejoin": "round",
+          "stroke-linecap": "round"
+        }));
+
+        app.scores.forEach((score, index) => {
+          svg.appendChild(el("circle", {
+            cx: xScale(index),
+            cy: yScale(score),
+            r: 5,
+            fill: "#fff",
+            stroke: app.color,
+            "stroke-width": 3
+          }));
+        });
+      });
+    }
+
+    function addHoverZones() {
+      categories.forEach((category, index) => {
+        const x = xScale(index);
+        const zone = el("rect", {
+          x: index === 0 ? pad.left - xStep / 2 : x - xStep / 2,
+          y: pad.top,
+          width: index === 0 || index === categories.length - 1 ? xStep / 2 : xStep,
+          height: chartH,
+          fill: "transparent",
+          "data-index": index
+        });
+        zone.addEventListener("mousemove", event => showTooltip(event, index));
+        zone.addEventListener("mouseleave", hideTooltip);
+        svg.appendChild(zone);
+      });
+    }
+
+    function showTooltip(event, index) {
+      const rows = apps.map(app => `
+        <div class="row">
+          <span class="name"><span class="dot" style="background:${app.color}"></span>${app.name}</span>
+          <span class="score">${app.scores[index]} / 5</span>
+        </div>
+      `).join("");
+
+      tooltip.innerHTML = `<strong>${categories[index]}</strong>${rows}`;
+      tooltip.style.display = "block";
+
+      const wrapRect = chartWrap.getBoundingClientRect();
+      const tipRect = tooltip.getBoundingClientRect();
+      let left = event.clientX - wrapRect.left + chartWrap.scrollLeft + 16;
+      let top = event.clientY - wrapRect.top + chartWrap.scrollTop - 18;
+
+      const maxLeft = chartWrap.scrollLeft + chartWrap.clientWidth - tipRect.width - 10;
+      if (left > maxLeft) left = event.clientX - wrapRect.left + chartWrap.scrollLeft - tipRect.width - 16;
+      if (top < 8) top = 8;
+
+      tooltip.style.left = `${left}px`;
+      tooltip.style.top = `${top}px`;
+    }
+
+    function hideTooltip() {
+      tooltip.style.display = "none";
+    }
+
+    function buildLegend() {
+      const legend = document.getElementById("legend");
+      legend.innerHTML = apps.map(app => `
+        <span><i class="dot" style="background:${app.color}"></i>${app.name}</span>
+      `).join("");
+    }
+
+    function buildTable() {
+      const tbody = document.querySelector("#scoreTable tbody");
+      tbody.innerHTML = categories.map((category, index) => `
+        <tr>
+          <td>${category}</td>
+          ${apps.map(app => `<td>${app.scores[index]}</td>`).join("")}
+        </tr>
+      `).join("");
+    }
+
+    buildLegend();
+    drawGrid();
+    drawSeries();
+    addHoverZones();
+    buildTable();
+  </script>
+</body>
+</html>
