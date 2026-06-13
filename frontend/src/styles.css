@@ -453,10 +453,18 @@ select:focus {
   gap: 12px;
 }
 
+.load-more-button {
+  width: 100%;
+  justify-content: center;
+  margin-top: 14px;
+}
+
 .list-item {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 18px;
+  min-height: 132px;
   padding: 18px 20px;
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -474,21 +482,42 @@ select:focus {
   min-width: 0;
 }
 
+.list-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.author-name {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .list-item strong,
 .list-item span {
   display: block;
 }
 
 .list-item strong {
-  margin: 8px 0 6px;
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 10px 0 6px;
   color: #111827;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .list-item span:not(.route-badge):not(.tag-pill) {
+  display: -webkit-box;
   color: var(--muted);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .list-item small,
@@ -498,6 +527,20 @@ select:focus {
   gap: 5px;
   color: var(--muted);
   white-space: nowrap;
+}
+
+.list-item small {
+  justify-content: center;
+  min-width: 46px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  font-weight: 900;
+}
+
+.list-tags {
+  margin-top: 12px;
 }
 
 .faq-grid {
@@ -787,7 +830,8 @@ select:focus {
   .section-heading,
   .detail-actions,
   .list-item {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .filter-bar,

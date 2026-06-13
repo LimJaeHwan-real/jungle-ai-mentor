@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { User } from '../users/user.entity';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { CreatePostDto } from './dto/create-post.dto';
+import { ListCommentsDto } from './dto/list-comments.dto';
 import { ListPostsDto } from './dto/list-posts.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
@@ -48,8 +49,8 @@ export class PostsController {
   }
 
   @Get('posts/:postId/comments')
-  listComments(@Param('postId') postId: string) {
-    return this.postsService.listComments(postId);
+  listComments(@Param('postId') postId: string, @Query() query: ListCommentsDto) {
+    return this.postsService.listComments(postId, query);
   }
 
   @Patch('comments/:id')

@@ -4,6 +4,7 @@ import { In, Repository } from 'typeorm';
 import { User } from '../users/user.entity';
 import { CreateCommentDto } from './dto/create-comment.dto';
 import { CreatePostDto } from './dto/create-post.dto';
+import { ListCommentsDto } from './dto/list-comments.dto';
 import { ListPostsDto } from './dto/list-posts.dto';
 import { UpdateCommentDto } from './dto/update-comment.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
@@ -137,13 +138,26 @@ export class PostsService {
     return this.getComment(comment.id);
   }
 
-  async listComments(postId: string) {
-    const comments = await this.comments.find({
+  async listComments(postId: string, query: ListCommentsDto) {
+    const page = Number(query.page ?? 1);
+    const limit = Number(query.limit ?? 10);
+
+    const [comments, total] = await this.comments.findAndCount({
       where: { postId },
       relations: { user: true },
       order: { createdAt: 'ASC' },
+      skip: (page - 1) * limit,
+      take: limit,
     });
-    return comments.map((comment) => this.serializeComment(comment));
+    return {
+      items: comments.map((comment) => this.serializeComment(comment)),
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 
   async updateComment(user: User, id: string, dto: UpdateCommentDto) {

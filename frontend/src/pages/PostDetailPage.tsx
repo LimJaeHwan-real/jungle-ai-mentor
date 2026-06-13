@@ -1,12 +1,14 @@
-import { FormEvent, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { FormEvent, useMemo, useState } from 'react';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Edit3, MessageSquare, Send, Trash2 } from 'lucide-react';
 import { api, getErrorMessage } from '../api';
 import { EmptyState } from '../components/EmptyState';
 import { Loading } from '../components/Loading';
 import { useAuth } from '../state/AuthContext';
-import { Comment, Post } from '../types';
+import { Comment, Page, Post } from '../types';
+
+const COMMENT_PAGE_SIZE = 10;
 
 export function PostDetailPage() {
   const { id } = useParams();
@@ -23,11 +25,22 @@ export function PostDetailPage() {
     enabled: Boolean(id),
   });
 
-  const commentsQuery = useQuery({
+  const commentsQuery = useInfiniteQuery({
     queryKey: ['comments', id],
-    queryFn: async () => (await api.get<Comment[]>(`/posts/${id}/comments`)).data,
+    initialPageParam: 1,
+    queryFn: async ({ pageParam }) =>
+      (
+        await api.get<Page<Comment>>(`/posts/${id}/comments`, {
+          params: { page: pageParam, limit: COMMENT_PAGE_SIZE },
+        })
+      ).data,
+    getNextPageParam: (lastPage) => (lastPage.meta.page < lastPage.meta.totalPages ? lastPage.meta.page + 1 : undefined),
     enabled: Boolean(id),
   });
+
+  const comments = useMemo(() => commentsQuery.data?.pages.flatMap((page) => page.items) ?? [], [commentsQuery.data]);
+  const commentPages = commentsQuery.data?.pages;
+  const commentMeta = commentPages?.[commentPages.length - 1]?.meta;
 
   const createComment = useMutation({
     mutationFn: async () => (await api.post<Comment>(`/posts/${id}/comments`, { content: comment })).data,
@@ -94,7 +107,9 @@ export function PostDetailPage() {
         <p className="muted-line">작성자 {post.author?.nickname ?? '알 수 없음'} · 조회 {post.viewCount}</p>
         <div className="tag-row">
           {post.tags.map((tag) => (
-            <span className="tag-pill" key={tag}>#{tag}</span>
+            <span className="tag-pill" key={tag}>
+              #{tag}
+            </span>
           ))}
         </div>
         <div className="post-content">{post.content}</div>
@@ -103,7 +118,9 @@ export function PostDetailPage() {
       <section className="section-block">
         <div className="section-heading compact">
           <h2>댓글</h2>
-          <span className="count-chip"><MessageSquare size={14} /> {post.commentCount}</span>
+          <span className="count-chip">
+            <MessageSquare size={14} /> {post.commentCount}
+          </span>
         </div>
         {token ? (
           <form className="comment-form" onSubmit={onCommentSubmit}>
@@ -118,41 +135,52 @@ export function PostDetailPage() {
         {createComment.error && <p className="error-text">{getErrorMessage(createComment.error)}</p>}
         {commentsQuery.isLoading ? (
           <Loading />
-        ) : commentsQuery.data?.length ? (
-          <div className="comment-list">
-            {commentsQuery.data.map((item) => {
-              const canEdit = user?.id === item.author?.id;
-              const isEditing = editingCommentId === item.id;
-              return (
-                <div className="comment-item" key={item.id}>
-                  <strong>{item.author?.nickname ?? '알 수 없음'}</strong>
-                  {isEditing ? (
-                    <div className="comment-edit">
-                      <textarea value={editingContent} onChange={(event) => setEditingContent(event.target.value)} rows={3} />
-                      <button className="secondary-button small" type="button" onClick={() => updateComment.mutate()}>
-                        저장
-                      </button>
-                    </div>
-                  ) : (
-                    <p>{item.content}</p>
-                  )}
-                  {canEdit && !isEditing && (
-                    <div className="button-row">
-                      <button className="ghost-button small" type="button" onClick={() => {
-                        setEditingCommentId(item.id);
-                        setEditingContent(item.content);
-                      }}>
-                        수정
-                      </button>
-                      <button className="ghost-button small danger-text" type="button" onClick={() => deleteComment.mutate(item.id)}>
-                        삭제
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+        ) : comments.length ? (
+          <>
+            <div className="comment-list">
+              {comments.map((item) => {
+                const canEdit = user?.id === item.author?.id;
+                const isEditing = editingCommentId === item.id;
+                return (
+                  <div className="comment-item" key={item.id}>
+                    <strong>{item.author?.nickname ?? '알 수 없음'}</strong>
+                    {isEditing ? (
+                      <div className="comment-edit">
+                        <textarea value={editingContent} onChange={(event) => setEditingContent(event.target.value)} rows={3} />
+                        <button className="secondary-button small" type="button" onClick={() => updateComment.mutate()}>
+                          저장
+                        </button>
+                      </div>
+                    ) : (
+                      <p>{item.content}</p>
+                    )}
+                    {canEdit && !isEditing && (
+                      <div className="button-row">
+                        <button
+                          className="ghost-button small"
+                          type="button"
+                          onClick={() => {
+                            setEditingCommentId(item.id);
+                            setEditingContent(item.content);
+                          }}
+                        >
+                          수정
+                        </button>
+                        <button className="ghost-button small danger-text" type="button" onClick={() => deleteComment.mutate(item.id)}>
+                          삭제
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {commentsQuery.hasNextPage && (
+              <button className="secondary-button load-more-button" type="button" onClick={() => commentsQuery.fetchNextPage()} disabled={commentsQuery.isFetchingNextPage}>
+                {commentsQuery.isFetchingNextPage ? '댓글 불러오는 중' : `댓글 더보기 (${comments.length}/${commentMeta?.total ?? post.commentCount})`}
+              </button>
+            )}
+          </>
         ) : (
           <EmptyState title="댓글이 없습니다" description="첫 댓글로 토론을 시작해보세요." />
         )}
@@ -160,4 +188,3 @@ export function PostDetailPage() {
     </div>
   );
 }
-

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, Bot, Database, GitBranch, MessagesSquare } from 'lucide-react';
+import { ArrowRight, Bot, Database, GitBranch, MessageCircle, MessagesSquare } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { EmptyState } from '../components/EmptyState';
@@ -51,10 +51,19 @@ export function HomePage() {
             {postsQuery.data.items.map((post) => (
               <Link className="list-item" key={post.id} to={`/posts/${post.id}`}>
                 <div>
+                  <div className="list-meta">
+                    <span className="route-badge">{post.type === 'QUESTION' ? '질문' : '정보공유'} · {post.category}</span>
+                    {post.author?.nickname && <span className="author-name">{post.author.nickname}</span>}
+                  </div>
                   <strong>{post.title}</strong>
                   <span>{post.content}</span>
+                  <div className="tag-row list-tags">
+                    {post.tags.slice(0, 3).map((tag) => (
+                      <span className="tag-pill" key={tag}>#{tag}</span>
+                    ))}
+                  </div>
                 </div>
-                <small>{post.commentCount} comments</small>
+                <small><MessageCircle size={14} /> {post.commentCount}</small>
               </Link>
             ))}
           </div>
@@ -86,4 +95,3 @@ export function HomePage() {
     </div>
   );
 }
-
