@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/demo-home.png" alt="정글 AI 멘토 홈 대시보드" width="100%" />
+  <img src="docs/demo.gif" alt="정글 AI 멘토 주요 기능 시연" width="100%" />
 </p>
 
 # 정글 AI 멘토 게시판 MVP
