@@ -1,10 +1,9 @@
 from pathlib import Path
 
-from diagrams import Cluster, Diagram, Edge
+from diagrams import Cluster, Diagram, Edge, Node
 from diagrams.onprem.client import Users
 from diagrams.onprem.database import PostgreSQL
 from diagrams.onprem.vcs import Github
-from diagrams.programming.flowchart import Action, Decision, StoredData
 from diagrams.programming.framework import React
 from diagrams.programming.language import NodeJS
 
@@ -13,37 +12,109 @@ OUTPUT_PATH = Path(__file__).with_name("architecture")
 
 GRAPH_ATTRIBUTES = {
     "bgcolor": "white",
-    "fontname": "Malgun Gothic",
-    "fontsize": "18",
+    "dpi": "192",
+    "fontname": "Malgun Gothic Bold",
+    "fontsize": "24",
     "labeljust": "c",
     "labelloc": "t",
-    "nodesep": "0.60",
-    "pad": "0.35",
-    "ranksep": "0.75",
-    "splines": "polyline",
+    "nodesep": "0.72",
+    "pad": "0.45",
+    "ranksep": "1.05",
+    "splines": "ortho",
 }
 
 NODE_ATTRIBUTES = {
-    "fontname": "Malgun Gothic",
-    "fontsize": "11",
+    "fontname": "Malgun Gothic Bold",
+    "fontsize": "12",
+    "height": "1.05",
+    "imagescale": "true",
+    "labelloc": "b",
 }
 
 EDGE_ATTRIBUTES = {
-    "color": "#64748B",
-    "fontcolor": "#334155",
-    "fontname": "Malgun Gothic",
-    "fontsize": "9",
-    "penwidth": "1.4",
+    "arrowsize": "0.8",
+    "color": "#334155",
+    "fontcolor": "#1E293B",
+    "fontname": "Malgun Gothic Bold",
+    "fontsize": "10",
+    "penwidth": "1.6",
 }
 
-REQUEST_EDGE = {"color": "#2563EB", "fontcolor": "#1E3A8A"}
-DATA_EDGE = {"color": "#0F766E", "fontcolor": "#115E59"}
+REQUEST_EDGE = {"color": "#2563EB", "fontcolor": "#1D4ED8"}
+AI_EDGE = {"color": "#7C3AED", "fontcolor": "#6D28D9"}
+DATA_EDGE = {"color": "#059669", "fontcolor": "#047857"}
 EXTERNAL_EDGE = {
-    "color": "#7C3AED",
-    "constraint": "false",
-    "fontcolor": "#5B21B6",
+    "color": "#D97706",
+    "fontcolor": "#B45309",
     "style": "dashed",
 }
+
+FRONTEND_CLUSTER = {
+    "bgcolor": "#F8FBFF",
+    "color": "#38BDF8",
+    "fillcolor": "#F8FBFF",
+    "fontcolor": "#0369A1",
+    "fontname": "Malgun Gothic Bold",
+    "fontsize": "20",
+    "margin": "24",
+    "penwidth": "1.8",
+    "style": "rounded,filled",
+}
+
+BACKEND_CLUSTER = {
+    "bgcolor": "#FAF9FF",
+    "color": "#8B5CF6",
+    "fillcolor": "#FAF9FF",
+    "fontcolor": "#6D28D9",
+    "fontname": "Malgun Gothic Bold",
+    "fontsize": "20",
+    "margin": "24",
+    "penwidth": "1.8",
+    "style": "rounded,filled",
+}
+
+DATA_CLUSTER = {
+    "bgcolor": "#F4FBF7",
+    "color": "#22C55E",
+    "fillcolor": "#F4FBF7",
+    "fontcolor": "#15803D",
+    "fontname": "Malgun Gothic Bold",
+    "fontsize": "20",
+    "margin": "24",
+    "penwidth": "1.8",
+    "style": "rounded,filled",
+}
+
+EXTERNAL_CLUSTER = {
+    "bgcolor": "#FFFBF5",
+    "color": "#F59E0B",
+    "fillcolor": "#FFFBF5",
+    "fontcolor": "#B45309",
+    "fontname": "Malgun Gothic Bold",
+    "fontsize": "20",
+    "labelloc": "b",
+    "margin": "24",
+    "penwidth": "1.8",
+    "style": "rounded,filled",
+}
+
+
+def text_box(label: str, *, border: str, fill: str, font: str) -> Node:
+    return Node(
+        label,
+        shape="box",
+        style="rounded,filled",
+        color=border,
+        fillcolor=fill,
+        fontcolor=font,
+        fontname="Malgun Gothic Bold",
+        fontsize="12",
+        height="0.82",
+        width="1.85",
+        margin="0.18,0.12",
+        penwidth="1.6",
+        labelloc="c",
+    )
 
 
 with Diagram(
@@ -55,30 +126,62 @@ with Diagram(
     graph_attr=GRAPH_ATTRIBUTES,
     node_attr=NODE_ATTRIBUTES,
     edge_attr=EDGE_ATTRIBUTES,
-):
-    user = Users("사용자")
-    frontend = React("React + Vite\nTypeScript")
-    api = NodeJS("NestJS REST API\nNode.js + TypeScript")
-    agent = Decision("AgentService\nTool Routing")
-    rag = StoredData("RAG / FAQ Search\nChunking · Vector Search")
-    with Cluster("PostgreSQL 16 + pgvector", direction="TB"):
-        app_data = PostgreSQL("Relational Data\nusers · posts · faqs")
-        vector_data = StoredData("Vector Data\ndocuments · chunks")
+) as diagram:
+    user = Users(
+        "사용자",
+        fontname="Malgun Gothic Bold",
+        fontsize="16",
+        fontcolor="#111827",
+    )
 
-    with Cluster("External APIs", direction="TB"):
-        openai = Action("OpenAI API\nLLM · Embeddings")
+    with Cluster("FrontEnd", direction="LR", graph_attr=FRONTEND_CLUSTER):
+        frontend = React("React + Vite\nTypeScript")
+
+    with Cluster("Backend / AI", direction="LR", graph_attr=BACKEND_CLUSTER):
+        api = NodeJS("NestJS REST API\nJWT · CRUD")
+        agent = text_box(
+            "AgentService\nTool Routing",
+            border="#8B5CF6",
+            fill="#F3E8FF",
+            font="#5B21B6",
+        )
+        rag = text_box(
+            "RAG / FAQ Search\nChunk · Vector Search",
+            border="#8B5CF6",
+            fill="#F5F3FF",
+            font="#5B21B6",
+        )
+
+    with Cluster("Data", direction="TB", graph_attr=DATA_CLUSTER):
+        vector_data = PostgreSQL("PostgreSQL + pgvector\ndocuments · chunks")
+        app_data = PostgreSQL("PostgreSQL 16\nusers · posts · faqs")
+
+    with Cluster("External Services", direction="LR", graph_attr=EXTERNAL_CLUSTER):
+        openai = text_box(
+            "OpenAI API\nLLM · Embeddings",
+            border="#374151",
+            fill="#F9FAFB",
+            font="#111827",
+        )
         github = Github("GitHub REST API\nMCP Adapter")
-        blog_search = Action("Blog Search\nNaver · DuckDuckGo")
+        blog_search = text_box(
+            "Blog Search\nRAG Fallback\nNaver · DuckDuckGo",
+            border="#D97706",
+            fill="#FFF7ED",
+            font="#9A3412",
+        )
 
     user >> Edge(label="웹 사용", **REQUEST_EDGE) >> frontend
-    frontend >> Edge(label="REST API · JWT", **REQUEST_EDGE) >> api
-    api >> Edge(label="/api/ai/ask", **REQUEST_EDGE) >> agent
-    agent >> Edge(weight="10", **REQUEST_EDGE) >> rag
+    frontend >> Edge(**REQUEST_EDGE) >> api
+    api >> Edge(label="질문 요청", **AI_EDGE) >> agent
+    agent >> Edge(label="근거 검색", **AI_EDGE) >> rag
 
-    api >> Edge(label="CRUD", constraint="false", **DATA_EDGE) >> app_data
+    api >> Edge(**DATA_EDGE) >> app_data
     rag >> Edge(label="vector · chunk", **DATA_EDGE) >> vector_data
 
-    agent >> Edge(label="답변 · embedding", **EXTERNAL_EDGE) >> openai
-    agent >> Edge(label="저장소 분석", **EXTERNAL_EDGE) >> github
-    agent >> Edge(label="근거 부족 시 검색", **EXTERNAL_EDGE) >> blog_search
-    blog_search >> Edge(label="본문 인덱싱", constraint="false", **DATA_EDGE) >> rag
+    agent >> Edge(constraint="false", **EXTERNAL_EDGE) >> openai
+    agent >> Edge(constraint="false", **EXTERNAL_EDGE) >> github
+    vector_data >> Edge(style="invis", weight="20") >> app_data
+    openai >> Edge(style="invis", weight="20") >> github
+    github >> Edge(style="invis", weight="20") >> blog_search
+    agent >> Edge(style="invis", weight="30") >> github
