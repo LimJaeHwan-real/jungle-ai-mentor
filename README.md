@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/demo-home.png" alt="정글 AI 멘토 홈 대시보드" width="100%" />
+</p>
+
 # 정글 AI 멘토 게시판 MVP
 
 React, NestJS, PostgreSQL, pgvector 기반의 AI 학습 커뮤니티 게시판 MVP입니다. 사용자는 회원가입/로그인 후 질문과 정보 공유 글을 작성하고, 댓글과 태그/검색/페이징으로 게시판을 사용할 수 있습니다. AI 기능은 RAG Q&A, GitHub 저장소 MCP 분석, Agent 기반 tool routing으로 구성했습니다.
@@ -12,39 +16,32 @@ React, NestJS, PostgreSQL, pgvector 기반의 AI 학습 커뮤니티 게시판 M
 - GitHub 저장소 분석 MCP adapter와 mock/fallback 모드
 - AgentService 기반 질문 분류와 tool routing
 - 크래프톤 정글 관련 블로그 사전 인덱싱, 본문 추출, RAG 저장
-- OpenAI/GitHub 키가 없어도 데모 가능한 mock LLM, mock embedding, mock MCP
+- 외부 API 연결 없이도 데모 가능한 mock LLM, mock embedding, mock MCP
 
 ## 아키텍처
-```text
-frontend/
-  React + TypeScript + React Router + TanStack Query + Axios
-        |
-        | REST API
-        v
-backend/
-  NestJS + TypeORM
-  AuthModule       -> users, JWT, bcryptjs
-  PostsModule      -> posts, comments, tags, post_tags
-  AiModule         -> documents, document_chunks, ai_questions, faqs
-        |
-        v
-PostgreSQL + pgvector
-```
+
+<p align="center">
+  <img src="docs/architecture.png" alt="정글 AI 멘토 전체 아키텍처" width="100%" />
+</p>
+
+사용자 요청은 React 클라이언트에서 NestJS REST API로 전달됩니다. 일반 게시판 데이터는 PostgreSQL에 저장되고, AI 질문은 AgentService가 RAG 검색, OpenAI 답변 생성, GitHub 저장소 분석, 블로그 검색 도구로 분기합니다. 문서 chunk와 embedding은 pgvector를 통해 검색합니다.
+
+다이어그램 원본은 [`docs/architecture.py`](docs/architecture.py)에서 확인할 수 있습니다.
 
 ## RAG 구조
 1. `POST /api/admin/documents`로 문서를 등록합니다.
 2. 백엔드가 문서를 chunk로 나누고 embedding을 생성합니다.
-3. `OPENAI_API_KEY`가 있으면 OpenAI Embeddings를 사용합니다.
-4. 키가 없으면 deterministic mock embedding을 사용합니다.
+3. OpenAI Embeddings를 사용할 수 있으면 실제 embedding을 생성합니다.
+4. 외부 API를 사용할 수 없으면 deterministic mock embedding을 사용합니다.
 5. 검색 시 pgvector distance query를 먼저 시도하고, 실패하면 lexical fallback을 사용합니다.
 6. `/api/ai/ask`는 AgentService를 거쳐 `RAG_SEARCH_TOOL`을 선택할 수 있습니다.
 
 ## MCP 구조
 - API: `POST /api/mcp/github/analyze`
-- `MCP_GITHUB_MODE=mock`: 외부 연결 없이 데모 분석 반환
-- `MCP_GITHUB_MODE=github_api`: GitHub REST API로 README, repo metadata, root files 조회
-- `MCP_GITHUB_MODE=mcp_stdio`: 인터페이스 준비 상태이며 현재 MVP에서는 mock fallback 반환
-- `GITHUB_TOKEN`이 없거나 API 호출이 실패해도 전체 요청은 실패하지 않고 fallback 응답을 반환합니다.
+- Mock 모드는 외부 연결 없이 데모 분석을 반환합니다.
+- GitHub API 모드는 README, 저장소 metadata, root files를 조회합니다.
+- MCP stdio 모드는 인터페이스 준비 상태이며 현재 MVP에서는 mock fallback을 반환합니다.
+- 외부 API 호출이 실패해도 전체 요청은 실패하지 않고 fallback 응답을 반환합니다.
 
 ## 블로그 사전 인덱싱 구조
 질문할 때마다 블로그를 검색하면 느리고 embedding 비용이 중복으로 발생합니다. 그래서 기본 구조는 사전 인덱싱입니다.
@@ -71,11 +68,7 @@ POST /api/admin/blogs/sync
 
 질문 화면의 `근거 부족 시 블로그 검색 보강` 옵션이 켜져 있으면, 저장된 pgvector 검색 결과가 없거나 너무 약할 때만 실시간 검색 fallback을 수행합니다.
 
-검색 모드:
-- `BLOG_SEARCH_MODE=duckduckgo`: 별도 키 없이 DuckDuckGo HTML 검색 fallback 사용
-- `BLOG_SEARCH_MODE=naver_api`: `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`이 있으면 Naver Blog Search API 우선 사용
-- `BLOG_SEARCH_MODE=off`: 자동 블로그 검색 비활성화
-- `BLOG_SYNC_ENABLED=true`: 서버 실행 중 `BLOG_SYNC_INTERVAL_HOURS` 주기로 자동 sync
+블로그 검색은 DuckDuckGo HTML 검색을 기본 fallback으로 사용하며, Naver Blog Search API 연동과 자동 주기 sync도 지원합니다.
 
 ## Agent 구조
 `/api/ai/ask` 요청은 반드시 `AgentService`를 거칩니다.
@@ -103,100 +96,3 @@ npm.cmd --prefix frontend run dev
 접속:
 - Frontend: `http://localhost:5173`
 - Backend health: `http://localhost:3000/api/health`
-
-## 환경 변수
-`backend/.env`:
-
-```env
-PORT=3000
-FRONTEND_ORIGIN=http://localhost:5173
-JWT_SECRET=change-me-in-local-env
-JWT_EXPIRES_IN=1d
-DB_HOST=localhost
-DB_PORT=5433
-DB_USER=jungle
-DB_PASSWORD=jungle
-DB_NAME=jungle_ai_mentor
-TYPEORM_SYNC=true
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4o-mini
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-GITHUB_TOKEN=
-MCP_GITHUB_MODE=mock
-BLOG_SEARCH_MODE=duckduckgo
-BLOG_SEARCH_MAX_RESULTS=3
-BLOG_SYNC_ENABLED=false
-BLOG_SYNC_INTERVAL_HOURS=24
-BLOG_SYNC_RUN_ON_STARTUP=false
-BLOG_SYNC_MAX_RESULTS_PER_QUERY=3
-BLOG_SYNC_QUERIES=크래프톤 정글 후기 블로그|크래프톤 정글 지원 후기 블로그|크래프톤 정글 알고리즘 학습 블로그|크래프톤 정글 입학 준비 블로그|크래프톤 정글 회고 블로그
-NAVER_CLIENT_ID=
-NAVER_CLIENT_SECRET=
-```
-
-## 주요 API 테스트 예시
-회원가입:
-```powershell
-curl.exe -X POST http://localhost:3000/api/auth/signup `
-  -H "Content-Type: application/json" `
-  -d "{\"email\":\"demo@example.com\",\"password\":\"password123\",\"nickname\":\"demo\"}"
-```
-
-로그인:
-```powershell
-curl.exe -X POST http://localhost:3000/api/auth/login `
-  -H "Content-Type: application/json" `
-  -d "{\"email\":\"demo@example.com\",\"password\":\"password123\"}"
-```
-
-문서 등록:
-```powershell
-curl.exe -X POST http://localhost:3000/api/admin/documents `
-  -H "Content-Type: application/json" `
-  -H "Authorization: Bearer <TOKEN>" `
-  -d "{\"title\":\"정글 학습 가이드\",\"content\":\"정글에서는 매일 알고리즘 문제를 풀고 회고를 작성합니다.\",\"category\":\"STUDY\"}"
-```
-
-AI 질문:
-```powershell
-curl.exe -X POST http://localhost:3000/api/ai/ask `
-  -H "Content-Type: application/json" `
-  -H "Authorization: Bearer <TOKEN>" `
-  -d "{\"question\":\"정글 알고리즘 학습은 어떻게 하면 좋아?\"}"
-```
-
-GitHub MCP 분석:
-```powershell
-curl.exe -X POST http://localhost:3000/api/mcp/github/analyze `
-  -H "Content-Type: application/json" `
-  -d "{\"repositoryUrl\":\"https://github.com/facebook/react\"}"
-```
-
-## 단계별 구현과 테스트
-상세 체크리스트는 [IMPLEMENTATION_STEPS.md](IMPLEMENTATION_STEPS.md)에 정리했습니다.
-
-검증 명령:
-```powershell
-npm.cmd --prefix backend run build
-npm.cmd --prefix backend run test
-npm.cmd --prefix frontend run build
-```
-
-현재 검증 결과:
-- Backend build 통과
-- Backend test 통과: Agent route 분류 테스트 3개
-- Frontend build 통과
-
-## 데모 스크린샷
-프론트엔드 실행 후 첫 화면은 홈 대시보드에서 최근 게시글, 공개 FAQ, AI 질문 CTA, Agent tool signal을 보여줍니다.
-
-스크린샷 저장 위치:
-- `docs/demo-home.png`
-
-## 제약사항과 개선 아이디어
-- 관리자 권한 시스템은 MVP 범위에서 제외했고, 로그인 사용자가 문서를 등록할 수 있게 했습니다.
-- `TYPEORM_SYNC=true`는 개발 편의 설정입니다. 운영에서는 migration으로 전환해야 합니다.
-- `mcp_stdio`는 인터페이스만 두고 mock fallback으로 처리했습니다.
-- LangChain 의존성은 npm peer dependency 충돌을 피하기 위해 제외하고, MVP에서는 내부 chunk splitter를 사용했습니다.
-- OpenAI 키가 없으면 mock LLM/embedding으로 데모 응답이 생성됩니다.
-- 향후 개선: 관리자 role, FAQ 좋아요 API, 문서 중복 갱신, 실제 MCP stdio bridge, e2e 테스트, 배포 파이프라인.
