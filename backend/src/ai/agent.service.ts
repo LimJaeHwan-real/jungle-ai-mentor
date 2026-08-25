@@ -57,7 +57,15 @@ export class AgentService {
       };
       state.retrievalStatus = retrieval.status;
 
-      if (dto.autoBlogSearch !== false && retrieval.status === 'INSUFFICIENT_EVIDENCE') {
+      if (retrieval.status === 'SEARCH_DEGRADED') {
+        references = [];
+        state.ragDegraded = {
+          resultCount: results.length,
+          action: 'answer_generation_skipped',
+        };
+        answer = '현재 근거 검색 서비스에 일시적인 문제가 있어 신뢰할 수 있는 답변을 만들지 않았습니다. 잠시 후 다시 시도해 주세요.';
+      } else {
+        if (dto.autoBlogSearch !== false && retrieval.status === 'INSUFFICIENT_EVIDENCE') {
         usedTools.push('BLOG_SEARCH_TOOL');
         const blogSearch = await this.blogSearch.discoverAndImport(dto.question);
         state.blogSearch = {
@@ -71,37 +79,38 @@ export class AgentService {
         results = retrieval.results;
         state.retrievalStatus = retrieval.status;
         references = [...blogSearch.references, ...results];
-      }
+        }
 
-      const githubAnalyses = await this.analyzeGithubUrlsFromRagResults(results);
-      if (githubAnalyses.length > 0) {
-        usedTools.push('GITHUB_MCP_TOOL');
-        state.githubFromRag = {
-          repositoryCount: githubAnalyses.length,
-          repositories: githubAnalyses.map((analysis) => analysis.repositoryUrl),
-          fallbackCount: githubAnalyses.filter((analysis) => analysis.fallback).length,
-        };
-        references = [...githubAnalyses, ...references];
-      }
+        const githubAnalyses = await this.analyzeGithubUrlsFromRagResults(results);
+        if (githubAnalyses.length > 0) {
+          usedTools.push('GITHUB_MCP_TOOL');
+          state.githubFromRag = {
+            repositoryCount: githubAnalyses.length,
+            repositories: githubAnalyses.map((analysis) => analysis.repositoryUrl),
+            fallbackCount: githubAnalyses.filter((analysis) => analysis.fallback).length,
+          };
+          references = [...githubAnalyses, ...references];
+        }
 
-      answer = await this.llm.answer(
-        dto.question,
-        [
-          ...results.map((result) => ({
-            title: result.title,
-            content: result.chunkText,
-            category: result.category,
-            sourceUrl: result.sourceUrl,
-          })),
-          ...githubAnalyses.map((analysis) => ({
-            title: `GitHub repository: ${analysis.owner}/${analysis.repo}`,
-            content: this.formatGithubAnalysis(analysis),
-            category: 'GITHUB_REPOSITORY',
-            sourceUrl: analysis.repositoryUrl,
-          })),
-        ],
-        '정글 학습 자료와 자동 수집된 블로그 문서 chunk를 근거로 답변하세요. 근거 안에 GitHub 저장소 분석 정보가 있으면 사용자가 URL을 직접 입력하지 않았더라도 해당 저장소의 목적, README 요약, 파일 힌트를 함께 설명하세요. 근거가 부족하면 부족하다고 말하세요.',
-      );
+        answer = await this.llm.answer(
+          dto.question,
+          [
+            ...results.map((result) => ({
+              title: result.title,
+              content: result.chunkText,
+              category: result.category,
+              sourceUrl: result.sourceUrl,
+            })),
+            ...githubAnalyses.map((analysis) => ({
+              title: `GitHub repository: ${analysis.owner}/${analysis.repo}`,
+              content: this.formatGithubAnalysis(analysis),
+              category: 'GITHUB_REPOSITORY',
+              sourceUrl: analysis.repositoryUrl,
+            })),
+          ],
+          '정글 학습 자료와 자동 수집된 블로그 문서 chunk를 근거로 답변하세요. 근거 안에 GitHub 저장소 분석 정보가 있으면 사용자가 URL을 직접 입력하지 않았더라도 해당 저장소의 목적, README 요약, 파일 힌트를 함께 설명하세요. 근거가 부족하면 부족하다고 말하세요.',
+        );
+      }
     } else {
       usedTools.push('GENERAL_LLM_TOOL');
       answer = await this.llm.answer(dto.question);
