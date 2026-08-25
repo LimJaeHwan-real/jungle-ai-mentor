@@ -141,8 +141,8 @@ export class RagService {
         `,
         [vector, limit, metadata.model, metadata.mode, metadata.version, metadata.dimension],
       )) as RagSearchResult[];
-      const boardRows = await this.lexicalSearch(question, limit, 'BOARD_POST');
-      return this.mergeSearchResults(rows, boardRows, limit);
+      const lexicalRows = await this.lexicalSearch(question, limit);
+      return this.mergeSearchResults(rows, lexicalRows, limit);
     } catch {
       return this.lexicalSearch(question, limit);
     }
@@ -187,12 +187,13 @@ export class RagService {
 
   private mergeSearchResults(vectorRows: RagSearchResult[], lexicalRows: RagSearchResult[], limit: number) {
     const results = new Map<string, RagSearchResult>();
-    for (const row of [...vectorRows, ...lexicalRows]) {
+    const addRows = (rows: RagSearchResult[]) => rows.forEach((row, index) => {
+      const rrfScore = 1 / (60 + index + 1);
       const existing = results.get(row.chunkId);
-      if (!existing || row.score > existing.score) {
-        results.set(row.chunkId, row);
-      }
-    }
+      results.set(row.chunkId, { ...(existing ?? row), score: (existing?.score ?? 0) + rrfScore });
+    });
+    addRows(vectorRows);
+    addRows(lexicalRows);
     return [...results.values()].sort((a, b) => b.score - a.score).slice(0, limit);
   }
 
