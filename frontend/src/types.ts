@@ -80,4 +80,7 @@ export interface AiReference {
   content?: string;
   score?: number;
   category?: string;
+  sectionPath?: string;
+  sourceStart?: number;
+  sourceEnd?: number;
 }
