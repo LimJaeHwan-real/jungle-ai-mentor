@@ -24,6 +24,21 @@ export class KnowledgeDocument {
   @Column({ nullable: true })
   contentHash?: string;
 
+  @Column({ default: 'ACTIVE' })
+  indexStatus: string;
+
+  @Column({ nullable: true })
+  embeddingModel?: string;
+
+  @Column({ nullable: true })
+  embeddingMode?: string;
+
+  @Column({ nullable: true })
+  embeddingVersion?: string;
+
+  @Column({ nullable: true })
+  embeddingDimension?: number;
+
   @OneToMany(() => DocumentChunk, (chunk) => chunk.document)
   chunks: DocumentChunk[];
 

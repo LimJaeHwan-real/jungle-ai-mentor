@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { DocumentChunk } from './entities/document-chunk.entity';
 import { KnowledgeDocument } from './entities/knowledge-document.entity';
@@ -35,6 +35,7 @@ export class RagService {
     @InjectRepository(KnowledgeDocument) private readonly documents: Repository<KnowledgeDocument>,
     @InjectRepository(DocumentChunk) private readonly chunks: Repository<DocumentChunk>,
     private readonly embeddings: EmbeddingService,
+    private readonly dataSource: DataSource,
   ) {}
 
   async createDocument(dto: CreateDocumentDto) {
@@ -57,6 +58,15 @@ export class RagService {
       };
     }
 
+    const texts = this.splitText(dto.content);
+    let vectors: number[][];
+    try {
+      vectors = await Promise.all(texts.map((chunkText) => this.embeddings.embed(chunkText)));
+    } catch (error) {
+      if (!existing) await this.documents.save(this.documents.create({ title: dto.title, content: dto.content, category: dto.category ?? 'GENERAL', sourceType: dto.sourceType ?? 'ADMIN', sourceUrl: dto.sourceUrl, contentHash, indexStatus: 'FAILED' }));
+      throw error;
+    }
+    const metadata = this.embeddings.getMetadata();
     const document = existing ?? this.documents.create();
     Object.assign(document, {
         title: dto.title,
@@ -65,33 +75,29 @@ export class RagService {
         sourceType: dto.sourceType ?? 'ADMIN',
         sourceUrl: dto.sourceUrl,
         contentHash,
+        indexStatus: 'ACTIVE', embeddingModel: metadata.model, embeddingMode: metadata.mode, embeddingVersion: metadata.version, embeddingDimension: metadata.dimension,
     });
-
-    const savedDocument = await this.documents.save(document);
-
-    if (existing) {
-      await this.chunks.delete({ documentId: savedDocument.id });
-    }
-
-    const texts = this.splitText(dto.content);
-    const chunks = await Promise.all(
-      texts.map(async (chunkText, index) =>
-        this.chunks.create({
-          documentId: savedDocument.id,
+    const savedDocument = await this.dataSource.transaction(async (manager) => {
+      const saved = await manager.save(KnowledgeDocument, document);
+      if (existing) await manager.delete(DocumentChunk, { documentId: saved.id });
+      const chunks = texts.map((chunkText, index) =>
+        manager.create(DocumentChunk, {
+          documentId: saved.id,
           chunkIndex: index,
           chunkText,
           tokenCount: Math.ceil(chunkText.length / 4),
-          embedding: await this.embeddings.embed(chunkText),
+          embedding: vectors[index],
         }),
-      ),
-    );
-    await this.chunks.save(chunks);
+      );
+      await manager.save(DocumentChunk, chunks);
+      return saved;
+    });
 
     return {
       id: savedDocument.id,
       title: savedDocument.title,
       category: savedDocument.category,
-      chunkCount: chunks.length,
+      chunkCount: texts.length,
       contentHash,
       status: existing ? 'updated' : 'created',
     };
@@ -100,6 +106,7 @@ export class RagService {
   async search(question: string, limit = 4): Promise<RagSearchResult[]> {
     const embedding = await this.embeddings.embed(question);
     const vector = this.embeddings.toSqlVector(embedding);
+    const metadata = this.embeddings.getMetadata();
 
     try {
       const rows = (await this.chunks.query(
@@ -115,10 +122,15 @@ export class RagService {
         FROM document_chunks c
         INNER JOIN documents d ON d.id = c."documentId"
         WHERE c.embedding IS NOT NULL
+          AND d."indexStatus" = 'ACTIVE'
+          AND d."embeddingModel" = $3
+          AND d."embeddingMode" = $4
+          AND d."embeddingVersion" = $5
+          AND d."embeddingDimension" = $6
         ORDER BY c.embedding <=> $1::vector
         LIMIT $2
         `,
-        [vector, limit],
+        [vector, limit, metadata.model, metadata.mode, metadata.version, metadata.dimension],
       )) as RagSearchResult[];
       const boardRows = await this.lexicalSearch(question, limit, 'BOARD_POST');
       return this.mergeSearchResults(rows, boardRows, limit);
