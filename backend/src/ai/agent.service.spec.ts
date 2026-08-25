@@ -19,4 +19,22 @@ describe('AgentService 검색 장애 처리', () => {
     expect(llm.answer).not.toHaveBeenCalled();
     expect(blogSearch.discoverAndImport).not.toHaveBeenCalled();
   });
+
+  it('활성 색인이 없을 때도 LLM 답변과 외부 검색을 실행하지 않는다', async () => {
+    const questions = {
+      create: jest.fn((value) => value),
+      save: jest.fn(async (value) => ({ ...value, id: 'question-2', isPublic: false, createdAt: new Date() })),
+    };
+    const rag = { searchWithStatus: jest.fn(async () => ({ results: [], status: 'NO_ACTIVE_INDEX' })) };
+    const llm = { answer: jest.fn() };
+    const blogSearch = { discoverAndImport: jest.fn() };
+    const service = new AgentService(questions as never, rag as never, {} as never, {} as never, llm as never, blogSearch as never);
+
+    const response = await service.ask({ id: 'user-1' } as never, { question: '정글 지원 일정 알려줘', autoBlogSearch: true });
+
+    expect(response.retrievalStatus).toBe('NO_ACTIVE_INDEX');
+    expect(response.answer).toContain('활성 지식 색인');
+    expect(llm.answer).not.toHaveBeenCalled();
+    expect(blogSearch.discoverAndImport).not.toHaveBeenCalled();
+  });
 });
