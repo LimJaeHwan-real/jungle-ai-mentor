@@ -249,7 +249,27 @@ export class RagService {
     });
     addRows(vectorRows);
     addRows(lexicalRows);
-    return [...results.values()].sort((a, b) => b.score - a.score).slice(0, limit);
+    return this.diversifyResults([...results.values()].sort((a, b) => b.score - a.score), limit);
+  }
+
+  private diversifyResults(results: RagSearchResult[], limit: number) {
+    const selected: RagSearchResult[] = [];
+    const selectedDocuments = new Set<string>();
+
+    for (const result of results) {
+      if (selectedDocuments.has(result.documentId)) continue;
+      selected.push(result);
+      selectedDocuments.add(result.documentId);
+      if (selected.length === limit) return selected;
+    }
+
+    for (const result of results) {
+      if (selected.some((item) => item.chunkId === result.chunkId)) continue;
+      selected.push(result);
+      if (selected.length === limit) break;
+    }
+
+    return selected;
   }
 
   private hasSufficientEvidence(results: RagSearchResult[]) {
