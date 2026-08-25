@@ -20,6 +20,13 @@ export interface RagSearchResult {
   score: number;
 }
 
+export type RagRetrievalStatus = 'SUFFICIENT_EVIDENCE' | 'INSUFFICIENT_EVIDENCE' | 'SEARCH_DEGRADED';
+
+export interface RagSearchResponse {
+  results: RagSearchResult[];
+  status: RagRetrievalStatus;
+}
+
 export interface RagIndexResult {
   id: string;
   title: string;
@@ -110,6 +117,10 @@ export class RagService {
   }
 
   async search(question: string, limit = 4): Promise<RagSearchResult[]> {
+    return (await this.searchWithStatus(question, limit)).results;
+  }
+
+  async searchWithStatus(question: string, limit = 4): Promise<RagSearchResponse> {
     const embedding = await this.embeddings.embed(question);
     const vector = this.embeddings.toSqlVector(embedding);
     const metadata = this.embeddings.getMetadata();
@@ -142,9 +153,14 @@ export class RagService {
         [vector, limit, metadata.model, metadata.mode, metadata.version, metadata.dimension],
       )) as RagSearchResult[];
       const lexicalRows = await this.lexicalSearch(question, limit);
-      return this.mergeSearchResults(rows, lexicalRows, limit);
+      const results = this.mergeSearchResults(rows, lexicalRows, limit);
+      return { results, status: this.hasSufficientEvidence(results) ? 'SUFFICIENT_EVIDENCE' : 'INSUFFICIENT_EVIDENCE' };
     } catch {
-      return this.lexicalSearch(question, limit);
+      try {
+        return { results: await this.lexicalSearch(question, limit), status: 'SEARCH_DEGRADED' };
+      } catch {
+        return { results: [], status: 'SEARCH_DEGRADED' };
+      }
     }
   }
 
@@ -195,6 +211,10 @@ export class RagService {
     addRows(vectorRows);
     addRows(lexicalRows);
     return [...results.values()].sort((a, b) => b.score - a.score).slice(0, limit);
+  }
+
+  private hasSufficientEvidence(results: RagSearchResult[]) {
+    return results.length > 0 && (results[0]?.score ?? 0) >= 1 / 61;
   }
 
   splitText(content: string): Array<{ chunkText: string; sectionPath?: string; sourceStart: number; sourceEnd: number }> {

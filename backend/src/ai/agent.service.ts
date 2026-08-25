@@ -47,14 +47,17 @@ export class AgentService {
       answer = await this.llm.answer(dto.question, faqs, '공개 FAQ를 우선 참고해서 답변하세요.');
     } else if (route === AgentRoute.JUNGLE_KNOWLEDGE) {
       usedTools.push('RAG_SEARCH_TOOL');
-      let results = await this.rag.search(dto.question);
+      let retrieval = await this.rag.searchWithStatus(dto.question);
+      let results = retrieval.results;
       references = results;
       state.ragFirst = {
         resultCount: results.length,
         topScore: results[0]?.score,
+        status: retrieval.status,
       };
+      state.retrievalStatus = retrieval.status;
 
-      if (dto.autoBlogSearch !== false && this.shouldUseRealtimeBlogFallback(results)) {
+      if (dto.autoBlogSearch !== false && retrieval.status === 'INSUFFICIENT_EVIDENCE') {
         usedTools.push('BLOG_SEARCH_TOOL');
         const blogSearch = await this.blogSearch.discoverAndImport(dto.question);
         state.blogSearch = {
@@ -64,7 +67,9 @@ export class AgentService {
           resultCount: blogSearch.references.length,
           reason: 'rag_results_insufficient',
         };
-        results = await this.rag.search(dto.question, 6);
+        retrieval = await this.rag.searchWithStatus(dto.question, 6);
+        results = retrieval.results;
+        state.retrievalStatus = retrieval.status;
         references = [...blogSearch.references, ...results];
       }
 
@@ -123,16 +128,11 @@ export class AgentService {
       usedTools: question.usedTools,
       agentRoute: question.agentRoute,
       agentState: question.agentState,
+      retrievalStatus: question.agentState.retrievalStatus,
       references,
       isPublic: question.isPublic,
       createdAt: question.createdAt,
     };
-  }
-
-  private shouldUseRealtimeBlogFallback(results: Array<{ score?: number }>) {
-    if (results.length === 0) return true;
-    const topScore = results[0]?.score ?? 0;
-    return topScore < 0.05;
   }
 
   private async analyzeGithubUrlsFromRagResults(results: RagSearchResult[]) {
