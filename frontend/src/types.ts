@@ -79,6 +79,7 @@ export interface AiReference {
   chunkText?: string;
   content?: string;
   score?: number;
+  rerankScore?: number;
   category?: string;
   sectionPath?: string;
   sourceStart?: number;

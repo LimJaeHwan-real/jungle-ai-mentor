@@ -19,6 +19,7 @@ export interface RagSearchResult {
   sourceStart?: number;
   sourceEnd?: number;
   score: number;
+  rerankScore?: number;
 }
 
 export type RagRetrievalStatus = 'SUFFICIENT_EVIDENCE' | 'INSUFFICIENT_EVIDENCE' | 'SEARCH_DEGRADED';
@@ -172,7 +173,7 @@ export class RagService {
         [vector, limit, metadata.model, metadata.mode, metadata.version, metadata.dimension],
       )) as RagSearchResult[];
       const lexicalRows = await this.lexicalSearch(question, limit);
-      const results = this.mergeSearchResults(rows, lexicalRows, limit);
+      const results = this.rerankResults(question, this.mergeSearchResults(rows, lexicalRows, limit));
       return this.completeSearch({ results, status: this.hasSufficientEvidence(results) ? 'SUFFICIENT_EVIDENCE' : 'INSUFFICIENT_EVIDENCE' }, startedAt);
     } catch {
       try {
@@ -272,8 +273,37 @@ export class RagService {
     return selected;
   }
 
+  private rerankResults(question: string, results: RagSearchResult[]) {
+    const terms = this.queryTerms(question);
+    if (!terms.size) return results;
+
+    return results
+      .map((result) => {
+        const titleHits = this.matchRatio(result.title, terms);
+        const contentHits = this.matchRatio(result.chunkText, terms);
+        const rerankScore = titleHits * 0.6 + contentHits * 0.4;
+        return { ...result, rerankScore };
+      })
+      .sort((a, b) => (b.rerankScore ?? 0) - (a.rerankScore ?? 0) || b.score - a.score);
+  }
+
   private hasSufficientEvidence(results: RagSearchResult[]) {
     return results.length > 0 && (results[0]?.score ?? 0) >= 1 / 61;
+  }
+
+  private queryTerms(question: string) {
+    return new Set(
+      question
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+  }
+
+  private matchRatio(text: string, terms: Set<string>) {
+    const normalized = text.toLowerCase();
+    return [...terms].filter((term) => normalized.includes(term)).length / terms.size;
   }
 
   private completeSearch(response: RagSearchResponse, startedAt: number) {
