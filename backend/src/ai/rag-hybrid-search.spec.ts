@@ -24,4 +24,14 @@ describe('RagService RRF 후보 결합', () => {
     );
     expect(results.map((item) => item.chunkId)).toEqual(['doc-a-1', 'doc-b-1']);
   });
+
+  it('제목과 본문이 질의어에 직접 일치하는 후보를 재정렬한다', () => {
+    const service = Object.create(RagService.prototype) as { rerankResults: (question: string, results: RagSearchResult[]) => RagSearchResult[] };
+    const results = service.rerankResults('지원 일정', [
+      { ...result('generic', 0.02), title: '안내', chunkText: '일반 안내입니다.' },
+      { ...result('matching-title', 0.01), title: '지원 일정', chunkText: '지원 일정과 준비 사항입니다.' },
+    ]);
+    expect(results.map((item) => item.chunkId)).toEqual(['matching-title', 'generic']);
+    expect(results[0].rerankScore).toBeGreaterThan(0);
+  });
 });
