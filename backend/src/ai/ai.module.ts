@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { User } from '../users/user.entity';
 import { AdminBlogsController } from './admin-blogs.controller';
 import { AdminDocumentsController } from './admin-documents.controller';
+import { AdminRagController } from './admin-rag.controller';
 import { AgentService } from './agent.service';
 import { AiController } from './ai.controller';
 import { BlogSearchService } from './blog-search.service';
@@ -18,10 +19,11 @@ import { GithubMcpService } from './github-mcp.service';
 import { LlmService } from './llm.service';
 import { McpController } from './mcp.controller';
 import { RagService } from './rag.service';
+import { RagMetricsService } from './rag-metrics.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([KnowledgeDocument, DocumentChunk, AiQuestion, Faq, User]), AuthModule],
-  controllers: [AdminBlogsController, AdminDocumentsController, AiController, FaqController, McpController],
-  providers: [AgentService, RagService, EmbeddingService, LlmService, FaqService, GithubMcpService, BlogSearchService],
+  controllers: [AdminBlogsController, AdminDocumentsController, AdminRagController, AiController, FaqController, McpController],
+  providers: [AgentService, RagService, RagMetricsService, EmbeddingService, LlmService, FaqService, GithubMcpService, BlogSearchService],
 })
 export class AiModule {}

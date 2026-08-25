@@ -6,6 +6,7 @@ import { CreateDocumentDto } from './dto/create-document.dto';
 import { DocumentChunk } from './entities/document-chunk.entity';
 import { KnowledgeDocument } from './entities/knowledge-document.entity';
 import { EmbeddingService } from './embedding.service';
+import { RagMetricsService } from './rag-metrics.service';
 
 export interface RagSearchResult {
   chunkId: string;
@@ -36,6 +37,18 @@ export interface RagIndexResult {
   status: 'created' | 'updated' | 'skipped';
 }
 
+export interface RagReindexTarget {
+  id: string;
+  title: string;
+  category: string;
+  indexStatus: string;
+  embeddingModel?: string;
+  embeddingMode?: string;
+  embeddingVersion?: string;
+  embeddingDimension?: number;
+  updatedAt: Date;
+}
+
 @Injectable()
 export class RagService {
   private readonly chunkSize = 700;
@@ -46,6 +59,7 @@ export class RagService {
     @InjectRepository(DocumentChunk) private readonly chunks: Repository<DocumentChunk>,
     private readonly embeddings: EmbeddingService,
     private readonly dataSource: DataSource,
+    private readonly metrics: RagMetricsService,
   ) {}
 
   async createDocument(dto: CreateDocumentDto) {
@@ -58,7 +72,7 @@ export class RagService {
 
     if (existing?.contentHash === contentHash) {
       const chunkCount = await this.chunks.count({ where: { documentId: existing.id } });
-      return {
+      const result: RagIndexResult = {
         id: existing.id,
         title: existing.title,
         category: existing.category,
@@ -66,6 +80,8 @@ export class RagService {
         contentHash,
         status: 'skipped',
       };
+      this.metrics.recordIndex(result.status);
+      return result;
     }
 
     const texts = this.splitText(dto.content);
@@ -74,6 +90,7 @@ export class RagService {
       vectors = await Promise.all(texts.map((chunk) => this.embeddings.embed(chunk.chunkText)));
     } catch (error) {
       if (!existing) await this.documents.save(this.documents.create({ title: dto.title, content: dto.content, category: dto.category ?? 'GENERAL', sourceType: dto.sourceType ?? 'ADMIN', sourceUrl: dto.sourceUrl, contentHash, indexStatus: 'FAILED' }));
+      this.metrics.recordIndex('failed');
       throw error;
     }
     const metadata = this.embeddings.getMetadata();
@@ -106,7 +123,7 @@ export class RagService {
       return saved;
     });
 
-    return {
+    const result: RagIndexResult = {
       id: savedDocument.id,
       title: savedDocument.title,
       category: savedDocument.category,
@@ -114,6 +131,8 @@ export class RagService {
       contentHash,
       status: existing ? 'updated' : 'created',
     };
+    this.metrics.recordIndex(result.status);
+    return result;
   }
 
   async search(question: string, limit = 4): Promise<RagSearchResult[]> {
@@ -121,11 +140,11 @@ export class RagService {
   }
 
   async searchWithStatus(question: string, limit = 4): Promise<RagSearchResponse> {
-    const embedding = await this.embeddings.embed(question);
-    const vector = this.embeddings.toSqlVector(embedding);
-    const metadata = this.embeddings.getMetadata();
-
+    const startedAt = Date.now();
     try {
+      const embedding = await this.embeddings.embed(question);
+      const vector = this.embeddings.toSqlVector(embedding);
+      const metadata = this.embeddings.getMetadata();
       const rows = (await this.chunks.query(
         `
         SELECT
@@ -154,14 +173,34 @@ export class RagService {
       )) as RagSearchResult[];
       const lexicalRows = await this.lexicalSearch(question, limit);
       const results = this.mergeSearchResults(rows, lexicalRows, limit);
-      return { results, status: this.hasSufficientEvidence(results) ? 'SUFFICIENT_EVIDENCE' : 'INSUFFICIENT_EVIDENCE' };
+      return this.completeSearch({ results, status: this.hasSufficientEvidence(results) ? 'SUFFICIENT_EVIDENCE' : 'INSUFFICIENT_EVIDENCE' }, startedAt);
     } catch {
       try {
-        return { results: await this.lexicalSearch(question, limit), status: 'SEARCH_DEGRADED' };
+        return this.completeSearch({ results: await this.lexicalSearch(question, limit), status: 'SEARCH_DEGRADED' }, startedAt);
       } catch {
-        return { results: [], status: 'SEARCH_DEGRADED' };
+        return this.completeSearch({ results: [], status: 'SEARCH_DEGRADED' }, startedAt);
       }
     }
+  }
+
+  async listReindexTargets(limit = 100) {
+    const expectedEmbedding = this.embeddings.getMetadata();
+    const documents = await this.documents
+      .createQueryBuilder('document')
+      .where('document."indexStatus" != :active', { active: 'ACTIVE' })
+      .orWhere('document."embeddingModel" IS NULL')
+      .orWhere('document."embeddingMode" IS NULL')
+      .orWhere('document."embeddingVersion" IS NULL')
+      .orWhere('document."embeddingDimension" IS NULL')
+      .orWhere('document."embeddingModel" != :model', { model: expectedEmbedding.model })
+      .orWhere('document."embeddingMode" != :mode', { mode: expectedEmbedding.mode })
+      .orWhere('document."embeddingVersion" != :version', { version: expectedEmbedding.version })
+      .orWhere('document."embeddingDimension" != :dimension', { dimension: expectedEmbedding.dimension })
+      .orderBy('document.updatedAt', 'DESC')
+      .take(limit)
+      .getMany();
+
+    return { expectedEmbedding, count: documents.length, documents: documents.map((document) => this.toReindexTarget(document)) };
   }
 
   private async lexicalSearch(question: string, limit: number, category?: string): Promise<RagSearchResult[]> {
@@ -215,6 +254,25 @@ export class RagService {
 
   private hasSufficientEvidence(results: RagSearchResult[]) {
     return results.length > 0 && (results[0]?.score ?? 0) >= 1 / 61;
+  }
+
+  private completeSearch(response: RagSearchResponse, startedAt: number) {
+    this.metrics.recordSearch(response.status, Date.now() - startedAt);
+    return response;
+  }
+
+  private toReindexTarget(document: KnowledgeDocument): RagReindexTarget {
+    return {
+      id: document.id,
+      title: document.title,
+      category: document.category,
+      indexStatus: document.indexStatus,
+      embeddingModel: document.embeddingModel,
+      embeddingMode: document.embeddingMode,
+      embeddingVersion: document.embeddingVersion,
+      embeddingDimension: document.embeddingDimension,
+      updatedAt: document.updatedAt,
+    };
   }
 
   splitText(content: string): Array<{ chunkText: string; sectionPath?: string; sourceStart: number; sourceEnd: number }> {
