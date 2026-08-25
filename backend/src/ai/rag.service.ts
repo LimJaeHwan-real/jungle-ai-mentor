@@ -22,7 +22,7 @@ export interface RagSearchResult {
   rerankScore?: number;
 }
 
-export type RagRetrievalStatus = 'SUFFICIENT_EVIDENCE' | 'INSUFFICIENT_EVIDENCE' | 'SEARCH_DEGRADED';
+export type RagRetrievalStatus = 'SUFFICIENT_EVIDENCE' | 'INSUFFICIENT_EVIDENCE' | 'NO_ACTIVE_INDEX' | 'SEARCH_DEGRADED';
 
 export interface RagSearchResponse {
   results: RagSearchResult[];
@@ -174,7 +174,12 @@ export class RagService {
       )) as RagSearchResult[];
       const lexicalRows = await this.lexicalSearch(question, limit);
       const results = this.rerankResults(question, this.mergeSearchResults(rows, lexicalRows, limit));
-      return this.completeSearch({ results, status: this.hasSufficientEvidence(results) ? 'SUFFICIENT_EVIDENCE' : 'INSUFFICIENT_EVIDENCE' }, startedAt);
+      const status = this.hasSufficientEvidence(results)
+        ? 'SUFFICIENT_EVIDENCE'
+        : results.length === 0 && !(await this.hasCompatibleActiveIndex(metadata))
+          ? 'NO_ACTIVE_INDEX'
+          : 'INSUFFICIENT_EVIDENCE';
+      return this.completeSearch({ results, status }, startedAt);
     } catch {
       try {
         return this.completeSearch({ results: await this.lexicalSearch(question, limit), status: 'SEARCH_DEGRADED' }, startedAt);
@@ -289,6 +294,18 @@ export class RagService {
 
   private hasSufficientEvidence(results: RagSearchResult[]) {
     return results.length > 0 && (results[0]?.score ?? 0) >= 1 / 61;
+  }
+
+  private async hasCompatibleActiveIndex(metadata: ReturnType<EmbeddingService['getMetadata']>) {
+    return (await this.documents.count({
+      where: {
+        indexStatus: 'ACTIVE',
+        embeddingModel: metadata.model,
+        embeddingMode: metadata.mode,
+        embeddingVersion: metadata.version,
+        embeddingDimension: metadata.dimension,
+      },
+    })) > 0;
   }
 
   private queryTerms(question: string) {

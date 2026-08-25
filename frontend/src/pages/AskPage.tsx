@@ -143,6 +143,8 @@ export function AskPage() {
                 <p className="muted-line">
                   {answer.retrievalStatus === 'SEARCH_DEGRADED'
                     ? '근거 검색 서비스에 문제가 있어 참고 근거를 표시하지 않았습니다. 잠시 후 다시 시도해 주세요.'
+                    : answer.retrievalStatus === 'NO_ACTIVE_INDEX'
+                      ? '현재 활성 지식 색인이 없어 참고 근거를 표시하지 않았습니다. 문서 색인 후 다시 시도해 주세요.'
                     : '아직 표시할 참고 근거가 없습니다. 블로그 자동 검색을 켜고 다시 질문해보세요.'}
                 </p>
               )}
