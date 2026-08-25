@@ -101,6 +101,7 @@ export function AskPage() {
           <>
             <div className="tool-row">
               <span className="route-badge">{answer.agentRoute}</span>
+              {answer.retrievalStatus && <span className="tag-pill">검색 상태: {answer.retrievalStatus}</span>}
               {answer.usedTools.map((tool) => (
                 <span className="tag-pill" key={tool}>
                   {tool}
