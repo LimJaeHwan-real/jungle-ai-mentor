@@ -14,6 +14,9 @@ export interface RagSearchResult {
   category: string;
   sourceUrl?: string;
   chunkText: string;
+  sectionPath?: string;
+  sourceStart?: number;
+  sourceEnd?: number;
   score: number;
 }
 
@@ -61,7 +64,7 @@ export class RagService {
     const texts = this.splitText(dto.content);
     let vectors: number[][];
     try {
-      vectors = await Promise.all(texts.map((chunkText) => this.embeddings.embed(chunkText)));
+      vectors = await Promise.all(texts.map((chunk) => this.embeddings.embed(chunk.chunkText)));
     } catch (error) {
       if (!existing) await this.documents.save(this.documents.create({ title: dto.title, content: dto.content, category: dto.category ?? 'GENERAL', sourceType: dto.sourceType ?? 'ADMIN', sourceUrl: dto.sourceUrl, contentHash, indexStatus: 'FAILED' }));
       throw error;
@@ -80,12 +83,15 @@ export class RagService {
     const savedDocument = await this.dataSource.transaction(async (manager) => {
       const saved = await manager.save(KnowledgeDocument, document);
       if (existing) await manager.delete(DocumentChunk, { documentId: saved.id });
-      const chunks = texts.map((chunkText, index) =>
+      const chunks = texts.map((chunk, index) =>
         manager.create(DocumentChunk, {
           documentId: saved.id,
           chunkIndex: index,
-          chunkText,
-          tokenCount: Math.ceil(chunkText.length / 4),
+          chunkText: chunk.chunkText,
+          sectionPath: chunk.sectionPath,
+          sourceStart: chunk.sourceStart,
+          sourceEnd: chunk.sourceEnd,
+          tokenCount: Math.ceil(chunk.chunkText.length / 4),
           embedding: vectors[index],
         }),
       );
@@ -118,6 +124,9 @@ export class RagService {
           d.category AS category,
           d."sourceUrl" AS "sourceUrl",
           c."chunkText" AS "chunkText",
+          c."sectionPath" AS "sectionPath",
+          c."sourceStart" AS "sourceStart",
+          c."sourceEnd" AS "sourceEnd",
           1 - (c.embedding <=> $1::vector) AS score
         FROM document_chunks c
         INNER JOIN documents d ON d.id = c."documentId"
@@ -187,31 +196,55 @@ export class RagService {
     return [...results.values()].sort((a, b) => b.score - a.score).slice(0, limit);
   }
 
-  private splitText(content: string) {
+  splitText(content: string): Array<{ chunkText: string; sectionPath?: string; sourceStart: number; sourceEnd: number }> {
     const normalized = content.replace(/\r\n/g, '\n').trim();
     if (!normalized) return [];
 
-    const chunks: string[] = [];
-    let start = 0;
+    const chunks: Array<{ chunkText: string; sectionPath?: string; sourceStart: number; sourceEnd: number }> = [];
+    const headingStarts = [...normalized.matchAll(/^#{1,6}\s+.+$/gm)].map((heading) => heading.index ?? 0);
+    const boundaries = [...new Set([0, ...headingStarts, normalized.length])].sort((a, b) => a - b);
 
-    while (start < normalized.length) {
-      const hardEnd = Math.min(start + this.chunkSize, normalized.length);
-      const slice = normalized.slice(start, hardEnd);
-      const paragraphBreak = slice.lastIndexOf('\n\n');
-      const sentenceBreak = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('! '), slice.lastIndexOf('? '));
-      const candidate =
-        paragraphBreak > this.chunkSize * 0.45
-          ? paragraphBreak
-          : sentenceBreak > this.chunkSize * 0.45
-            ? sentenceBreak + 1
-            : slice.length;
-      const softEnd = hardEnd === normalized.length ? hardEnd : start + candidate;
-
-      chunks.push(normalized.slice(start, softEnd).trim());
-      if (softEnd >= normalized.length) break;
-      start = Math.max(softEnd - this.chunkOverlap, start + 1);
+    for (let boundary = 0; boundary < boundaries.length - 1; boundary += 1) {
+      const rangeStart = boundaries[boundary];
+      const rangeEnd = boundaries[boundary + 1];
+      let start = rangeStart;
+      while (start < rangeEnd) {
+        const hardEnd = Math.min(start + this.chunkSize, rangeEnd);
+        const slice = normalized.slice(start, hardEnd);
+        const paragraphBreak = slice.lastIndexOf('\n\n');
+        const sentenceBreak = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('! '), slice.lastIndexOf('? '));
+        const candidate =
+          paragraphBreak > this.chunkSize * 0.45
+            ? paragraphBreak
+            : sentenceBreak > this.chunkSize * 0.45
+              ? sentenceBreak + 1
+              : slice.length;
+        const softEnd = hardEnd === rangeEnd ? hardEnd : start + candidate;
+        const chunkText = normalized.slice(start, softEnd).trim();
+        if (chunkText) chunks.push({ chunkText, sectionPath: this.sectionPathAt(normalized, start), sourceStart: start, sourceEnd: softEnd });
+        if (softEnd >= rangeEnd) break;
+        start = Math.max(softEnd - this.chunkOverlap, start + 1);
+      }
     }
 
-    return chunks.filter(Boolean);
+    const seen = new Set<string>();
+    return chunks.filter((chunk) => {
+      const key = chunk.chunkText.replace(/\s+/g, ' ').trim();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  private sectionPathAt(content: string, position: number) {
+    const headings = [...content.matchAll(/^(#{1,6})\s+(.+)$/gm)].filter((heading) => (heading.index ?? 0) <= position);
+    if (!headings.length) return undefined;
+    const path: string[] = [];
+    for (const heading of headings) {
+      const level = heading[1].length;
+      path.splice(level - 1);
+      path[level - 1] = heading[2].trim();
+    }
+    return path.filter(Boolean).join(' > ');
   }
 }
