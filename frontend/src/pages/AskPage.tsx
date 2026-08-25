@@ -125,12 +125,16 @@ export function AskPage() {
                         )}
                       </div>
                       <strong>{reference.title ?? '참고 문서'}</strong>
+                      {reference.sectionPath && <small>문서 위치: {reference.sectionPath}</small>}
                       {reference.sourceUrl && (
                         <a href={reference.sourceUrl} target="_blank" rel="noreferrer">
                           출처 열기 <ExternalLink size={14} />
                         </a>
                       )}
                       <p>{reference.chunkText ?? reference.content ?? reference.snippet ?? '본문을 가져오지 못했거나 이미 저장된 문서입니다.'}</p>
+                      {typeof reference.sourceStart === 'number' && typeof reference.sourceEnd === 'number' && (
+                        <small>원문 범위: {reference.sourceStart}–{reference.sourceEnd}</small>
+                      )}
                       {typeof reference.score === 'number' && <small>유사도 {reference.score.toFixed(3)}</small>}
                     </article>
                   ))}
