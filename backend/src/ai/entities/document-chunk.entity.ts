@@ -19,6 +19,15 @@ export class DocumentChunk {
   @Column({ type: 'text' })
   chunkText: string;
 
+  @Column({ nullable: true })
+  sectionPath?: string;
+
+  @Column({ nullable: true })
+  sourceStart?: number;
+
+  @Column({ nullable: true })
+  sourceEnd?: number;
+
   @Column({ type: 'vector' as 'text', length: 1536, nullable: true })
   embedding?: number[];
 
