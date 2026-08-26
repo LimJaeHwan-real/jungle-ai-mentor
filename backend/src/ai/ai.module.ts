@@ -20,10 +20,13 @@ import { LlmService } from './llm.service';
 import { McpController } from './mcp.controller';
 import { RagService } from './rag.service';
 import { RagMetricsService } from './rag-metrics.service';
+import { RagReindexJob } from './entities/rag-reindex-job.entity';
+import { RagReindexJobItem } from './entities/rag-reindex-job-item.entity';
+import { RagReindexService } from './rag-reindex.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([KnowledgeDocument, DocumentChunk, AiQuestion, Faq, User]), AuthModule],
+  imports: [TypeOrmModule.forFeature([KnowledgeDocument, DocumentChunk, AiQuestion, Faq, User, RagReindexJob, RagReindexJobItem]), AuthModule],
   controllers: [AdminBlogsController, AdminDocumentsController, AdminRagController, AiController, FaqController, McpController],
-  providers: [AgentService, RagService, RagMetricsService, EmbeddingService, LlmService, FaqService, GithubMcpService, BlogSearchService],
+  providers: [AgentService, RagService, RagMetricsService, RagReindexService, EmbeddingService, LlmService, FaqService, GithubMcpService, BlogSearchService],
 })
 export class AiModule {}

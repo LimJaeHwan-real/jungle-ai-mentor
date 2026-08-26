@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
-import { DataSource, Repository } from 'typeorm';
+import { Brackets, DataSource, Repository } from 'typeorm';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { DocumentChunk } from './entities/document-chunk.entity';
 import { KnowledgeDocument } from './entities/knowledge-document.entity';
@@ -68,11 +68,11 @@ export class RagService {
     return this.indexDocument(dto);
   }
 
-  async indexDocument(dto: CreateDocumentDto): Promise<RagIndexResult> {
+  async indexDocument(dto: CreateDocumentDto, options: { force?: boolean } = {}): Promise<RagIndexResult> {
     const contentHash = createHash('sha256').update(dto.content).digest('hex');
     const existing = dto.sourceUrl ? await this.documents.findOne({ where: { sourceUrl: dto.sourceUrl } }) : undefined;
 
-    if (existing?.contentHash === contentHash) {
+    if (existing?.contentHash === contentHash && !options.force) {
       const chunkCount = await this.chunks.count({ where: { documentId: existing.id } });
       const result: RagIndexResult = {
         id: existing.id,
@@ -87,6 +87,7 @@ export class RagService {
     }
 
     const texts = this.splitText(dto.content);
+    if (!texts.length) throw new BadRequestException('색인할 수 있는 문서 내용이 없습니다.');
     let vectors: number[][];
     try {
       vectors = await Promise.all(texts.map((chunk) => this.embeddings.embed(chunk.chunkText)));
@@ -135,6 +136,21 @@ export class RagService {
     };
     this.metrics.recordIndex(result.status);
     return result;
+  }
+
+  async reindexDocument(documentId: string): Promise<RagIndexResult> {
+    const document = await this.documents.findOne({ where: { id: documentId } });
+    if (!document) throw new NotFoundException('재색인 대상 문서를 찾을 수 없습니다.');
+    return this.indexDocument(
+      {
+        title: document.title,
+        content: document.content,
+        category: document.category,
+        sourceType: document.sourceType,
+        sourceUrl: document.sourceUrl,
+      },
+      { force: true },
+    );
   }
 
   async search(question: string, limit = 4): Promise<RagSearchResult[]> {
@@ -192,22 +208,15 @@ export class RagService {
 
   async listReindexTargets(limit = 100) {
     const expectedEmbedding = this.embeddings.getMetadata();
-    const documents = await this.documents
-      .createQueryBuilder('document')
-      .where('document."indexStatus" != :active', { active: 'ACTIVE' })
-      .orWhere('document."embeddingModel" IS NULL')
-      .orWhere('document."embeddingMode" IS NULL')
-      .orWhere('document."embeddingVersion" IS NULL')
-      .orWhere('document."embeddingDimension" IS NULL')
-      .orWhere('document."embeddingModel" != :model', { model: expectedEmbedding.model })
-      .orWhere('document."embeddingMode" != :mode', { mode: expectedEmbedding.mode })
-      .orWhere('document."embeddingVersion" != :version', { version: expectedEmbedding.version })
-      .orWhere('document."embeddingDimension" != :dimension', { dimension: expectedEmbedding.dimension })
-      .orderBy('document.updatedAt', 'DESC')
-      .take(limit)
-      .getMany();
+    const documents = await this.reindexTargetQuery().take(limit).getMany();
 
     return { expectedEmbedding, count: documents.length, documents: documents.map((document) => this.toReindexTarget(document)) };
+  }
+
+  async findReindexTargetDocuments(documentIds?: string[]) {
+    const query = this.reindexTargetQuery();
+    if (documentIds?.length) query.andWhere('document.id IN (:...documentIds)', { documentIds: [...new Set(documentIds)] });
+    return query.take(100).getMany();
   }
 
   private async lexicalSearch(question: string, limit: number, category?: string): Promise<RagSearchResult[]> {
@@ -362,6 +371,27 @@ export class RagService {
       embeddingDimension: document.embeddingDimension,
       updatedAt: document.updatedAt,
     };
+  }
+
+  private reindexTargetQuery() {
+    const expectedEmbedding = this.embeddings.getMetadata();
+    return this.documents
+      .createQueryBuilder('document')
+      .where(
+        new Brackets((query) => {
+          query
+            .where('document."indexStatus" != :active', { active: 'ACTIVE' })
+            .orWhere('document."embeddingModel" IS NULL')
+            .orWhere('document."embeddingMode" IS NULL')
+            .orWhere('document."embeddingVersion" IS NULL')
+            .orWhere('document."embeddingDimension" IS NULL')
+            .orWhere('document."embeddingModel" != :model', { model: expectedEmbedding.model })
+            .orWhere('document."embeddingMode" != :mode', { mode: expectedEmbedding.mode })
+            .orWhere('document."embeddingVersion" != :version', { version: expectedEmbedding.version })
+            .orWhere('document."embeddingDimension" != :dimension', { dimension: expectedEmbedding.dimension });
+        }),
+      )
+      .orderBy('document.updatedAt', 'DESC');
   }
 
   splitText(content: string): Array<{ chunkText: string; sectionPath?: string; sourceStart: number; sourceEnd: number }> {
