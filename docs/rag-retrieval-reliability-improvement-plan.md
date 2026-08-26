@@ -38,8 +38,8 @@
 ### 2.3 검색과 답변
 
 - 질의 embedding을 만들고 pgvector cosine distance(`<=>`)로 상위 chunk를 조회하며, 점수는 `1 - distance`로 계산한다.
-- 벡터 질의가 성공해도 `BOARD_POST` 범주의 lexical 검색 결과를 합친 뒤, 하나의 `score` 값으로 정렬한다.
-- 벡터 질의가 실패하면 최근 150개 chunk를 대상으로 단순 토큰 포함 비율을 계산하는 lexical 검색만 수행한다.
+- 벡터 질의가 성공하면 PostgreSQL FTS lexical 검색 결과를 함께 얻고 RRF로 결합한다.
+- 벡터 질의가 실패하면 PostgreSQL FTS lexical 검색만 수행하고 `SEARCH_DEGRADED` 상태를 반환한다.
 - 정글 지식 질문의 상위 점수가 0.05 미만이거나 결과가 없으면, 선택값에 따라 실시간 블로그 검색·가져오기 후 재검색한다.
 - 결과의 제목, 본문, 범주, 출처 URL을 LLM 컨텍스트로 전달하고, 응답 API의 `references`에 검색 결과를 포함한다.
 
@@ -59,7 +59,7 @@
 
 ### 3.4 lexical fallback의 품질과 성능
 
-fallback은 최근 150개 chunk를 메모리에서 순회해 공백 토큰 포함 여부만 확인한다. 한국어 조사·복합어·동의어를 처리하지 못하고, 데이터 증가에 따라 성능과 결과 재현성이 저하된다. 벡터 DB 오류와 "관련 문서 없음"도 같은 fallback 흐름에 섞여 원인 구분이 어렵다.
+이전 fallback은 최근 150개 chunk를 메모리에서 순회해 공백 토큰 포함 여부만 확인했다. 이 제한은 PostgreSQL FTS(`to_tsvector`/`websearch_to_tsquery`)와 GIN 표현식 인덱스로 대체했다. 현재 `simple` 구성은 한국어 형태소·동의어 분석을 제공하지 않으므로, 한국어 검색 구성 도입 여부는 여전히 별도 결정 사항이다.
 
 ### 3.5 chunk와 근거의 품질
 
@@ -143,7 +143,7 @@ fallback은 최근 150개 chunk를 메모리에서 순회해 공백 토큰 포�
 ### 6.4 하이브리드 후보 검색과 재정렬
 
 1. pgvector 검색은 실제 embedding·동일 모델·동일 차원·활성 색인 조건으로 후보를 가져온다.
-2. 키워드 검색은 PostgreSQL 전문 검색 또는 한국어 처리에 적합한 검색 구성으로 전환한다. 최근 150개만 순회하는 방식은 제거한다.
+2. 키워드 검색은 PostgreSQL 전문 검색으로 전환한다. `document_chunks.chunkText`와 `documents.title`의 `simple` FTS 표현식에 GIN 인덱스를 두고, `websearch_to_tsquery`로 자연어 질의를 변환한다. 최근 150개만 순회하는 방식은 제거한다.
 3. 모든 문서 범주에 같은 후보 생성 정책을 적용하되, 질문 유형과 권한에 따른 범주 필터는 명시적으로 둔다.
 4. vector와 lexical 결과는 각 후보군 안에서 정규화한 뒤, 가중 결합 또는 RRF(Reciprocal Rank Fusion)로 합친다. 서로 다른 원점의 점수를 직접 비교하지 않는다.
 5. 동일 문서의 인접·중복 chunk를 줄이고, 문서 다양성을 보장한 상위 후보를 reranker에 전달한다.
@@ -187,6 +187,7 @@ fallback은 최근 150개 chunk를 메모리에서 순회해 공백 토큰 포�
 - 실제 embedding 응답의 차원 불일치·NaN·빈 배열을 거부하는지 확인한다.
 - 색인 중 실패 시 기존 활성 chunk가 유지되는지, 성공 시에만 새 버전으로 교체되는지 확인한다.
 - vector DB 장애, 전문 검색 장애, 근거 부족, 결과 없음의 응답 상태와 로그 코드가 서로 다른지 확인한다.
+- lexical 검색이 최근 생성된 150개 chunk를 메모리 순회하지 않고 FTS 쿼리와 GIN 인덱스를 사용하는지, vector·lexical 결과의 기존 RRF 결합이 유지되는지 확인한다.
 - 인용된 chunk가 실제 답변 컨텍스트에 포함되었고 해당 문서·출처와 연결되는지 확인한다.
 
 ### 8.2 오프라인 품질 평가

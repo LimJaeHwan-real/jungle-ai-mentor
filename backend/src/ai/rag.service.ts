@@ -54,6 +54,7 @@ export interface RagReindexTarget {
 export class RagService {
   private readonly chunkSize = 700;
   private readonly chunkOverlap = 120;
+  private fullTextSchemaReady?: Promise<void>;
 
   constructor(
     @InjectRepository(KnowledgeDocument) private readonly documents: Repository<KnowledgeDocument>,
@@ -210,40 +211,77 @@ export class RagService {
   }
 
   private async lexicalSearch(question: string, limit: number, category?: string): Promise<RagSearchResult[]> {
-    const qb = this.chunks
-      .createQueryBuilder('chunk')
-      .leftJoinAndSelect('chunk.document', 'document')
-      .orderBy('chunk.createdAt', 'DESC')
-      .take(150);
-    if (category) {
-      qb.andWhere('document.category = :category', { category });
-    }
-    const chunks = await qb.getMany();
-    const terms = new Set(
-      question
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-        .split(/\s+/)
-        .filter(Boolean),
-    );
+    await this.ensureFullTextIndexes();
+    const rows = (await this.chunks.query(
+      `
+      WITH query AS (
+        SELECT websearch_to_tsquery('simple', $1) AS value
+      ), matches AS (
+        SELECT
+          c.id AS "chunkId",
+          c."documentId" AS "documentId",
+          d.title AS title,
+          d.category AS category,
+          d."sourceUrl" AS "sourceUrl",
+          c."chunkText" AS "chunkText",
+          c."sectionPath" AS "sectionPath",
+          c."sourceStart" AS "sourceStart",
+          c."sourceEnd" AS "sourceEnd",
+          ts_rank_cd(to_tsvector('simple', coalesce(c."chunkText", '')), query.value) AS score
+        FROM document_chunks c
+        INNER JOIN documents d ON d.id = c."documentId"
+        CROSS JOIN query
+        WHERE d."indexStatus" = 'ACTIVE'
+          AND to_tsvector('simple', coalesce(c."chunkText", '')) @@ query.value
+          AND ($3::text IS NULL OR d.category = $3)
 
-    return chunks
-      .map((chunk) => {
-        const haystack = `${chunk.chunkText} ${chunk.document?.title ?? ''}`.toLowerCase();
-        const hits = [...terms].filter((term) => haystack.includes(term)).length;
-        return {
-          chunkId: chunk.id,
-          documentId: chunk.documentId,
-          title: chunk.document?.title ?? '문서',
-          category: chunk.document?.category ?? 'GENERAL',
-          sourceUrl: chunk.document?.sourceUrl,
-          chunkText: chunk.chunkText,
-          score: hits / Math.max(terms.size, 1),
-        };
-      })
-      .filter((result) => result.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
+        UNION
+
+        SELECT
+          c.id AS "chunkId",
+          c."documentId" AS "documentId",
+          d.title AS title,
+          d.category AS category,
+          d."sourceUrl" AS "sourceUrl",
+          c."chunkText" AS "chunkText",
+          c."sectionPath" AS "sectionPath",
+          c."sourceStart" AS "sourceStart",
+          c."sourceEnd" AS "sourceEnd",
+          ts_rank_cd(to_tsvector('simple', coalesce(d.title, '')), query.value) AS score
+        FROM document_chunks c
+        INNER JOIN documents d ON d.id = c."documentId"
+        CROSS JOIN query
+        WHERE d."indexStatus" = 'ACTIVE'
+          AND to_tsvector('simple', coalesce(d.title, '')) @@ query.value
+          AND ($3::text IS NULL OR d.category = $3)
+      )
+      SELECT *
+      FROM (
+        SELECT *, row_number() OVER (PARTITION BY "chunkId" ORDER BY score DESC) AS match_rank
+        FROM matches
+      ) ranked_matches
+      WHERE match_rank = 1
+      ORDER BY score DESC
+      LIMIT $2
+      `,
+      [question, limit, category ?? null],
+    )) as RagSearchResult[];
+    return rows.sort((a, b) => b.score - a.score);
+  }
+
+  private ensureFullTextIndexes() {
+    if (!this.fullTextSchemaReady) {
+      this.fullTextSchemaReady = Promise.all([
+        this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_document_chunks_fts" ON document_chunks USING GIN (to_tsvector('simple', coalesce("chunkText", '')))`),
+        this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_documents_title_fts" ON documents USING GIN (to_tsvector('simple', coalesce(title, '')))`),
+      ])
+        .then(() => undefined)
+        .catch((error) => {
+          this.fullTextSchemaReady = undefined;
+          throw error;
+        });
+    }
+    return this.fullTextSchemaReady;
   }
 
   private mergeSearchResults(vectorRows: RagSearchResult[], lexicalRows: RagSearchResult[], limit: number) {
