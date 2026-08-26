@@ -7,6 +7,7 @@ import { DocumentChunk } from './entities/document-chunk.entity';
 import { KnowledgeDocument } from './entities/knowledge-document.entity';
 import { EmbeddingService } from './embedding.service';
 import { RagMetricsService } from './rag-metrics.service';
+import { chunkTextFtsExpression, documentTitleFtsExpression } from '../database/fts-expressions';
 
 export interface RagSearchResult {
   chunkId: string;
@@ -54,7 +55,6 @@ export interface RagReindexTarget {
 export class RagService {
   private readonly chunkSize = 700;
   private readonly chunkOverlap = 120;
-  private fullTextSchemaReady?: Promise<void>;
 
   constructor(
     @InjectRepository(KnowledgeDocument) private readonly documents: Repository<KnowledgeDocument>,
@@ -211,7 +211,6 @@ export class RagService {
   }
 
   private async lexicalSearch(question: string, limit: number, category?: string): Promise<RagSearchResult[]> {
-    await this.ensureFullTextIndexes();
     const rows = (await this.chunks.query(
       `
       WITH query AS (
@@ -227,12 +226,12 @@ export class RagService {
           c."sectionPath" AS "sectionPath",
           c."sourceStart" AS "sourceStart",
           c."sourceEnd" AS "sourceEnd",
-          ts_rank_cd(to_tsvector('simple', coalesce(c."chunkText", '')), query.value) AS score
+          ts_rank_cd(${chunkTextFtsExpression('c')}, query.value) AS score
         FROM document_chunks c
         INNER JOIN documents d ON d.id = c."documentId"
         CROSS JOIN query
         WHERE d."indexStatus" = 'ACTIVE'
-          AND to_tsvector('simple', coalesce(c."chunkText", '')) @@ query.value
+          AND ${chunkTextFtsExpression('c')} @@ query.value
           AND ($3::text IS NULL OR d.category = $3)
 
         UNION
@@ -247,12 +246,12 @@ export class RagService {
           c."sectionPath" AS "sectionPath",
           c."sourceStart" AS "sourceStart",
           c."sourceEnd" AS "sourceEnd",
-          ts_rank_cd(to_tsvector('simple', coalesce(d.title, '')), query.value) AS score
+          ts_rank_cd(${documentTitleFtsExpression('d')}, query.value) AS score
         FROM document_chunks c
         INNER JOIN documents d ON d.id = c."documentId"
         CROSS JOIN query
         WHERE d."indexStatus" = 'ACTIVE'
-          AND to_tsvector('simple', coalesce(d.title, '')) @@ query.value
+          AND ${documentTitleFtsExpression('d')} @@ query.value
           AND ($3::text IS NULL OR d.category = $3)
       )
       SELECT *
@@ -267,21 +266,6 @@ export class RagService {
       [question, limit, category ?? null],
     )) as RagSearchResult[];
     return rows.sort((a, b) => b.score - a.score);
-  }
-
-  private ensureFullTextIndexes() {
-    if (!this.fullTextSchemaReady) {
-      this.fullTextSchemaReady = Promise.all([
-        this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_document_chunks_fts" ON document_chunks USING GIN (to_tsvector('simple', coalesce("chunkText", '')))`),
-        this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_documents_title_fts" ON documents USING GIN (to_tsvector('simple', coalesce(title, '')))`),
-      ])
-        .then(() => undefined)
-        .catch((error) => {
-          this.fullTextSchemaReady = undefined;
-          throw error;
-        });
-    }
-    return this.fullTextSchemaReady;
   }
 
   private mergeSearchResults(vectorRows: RagSearchResult[], lexicalRows: RagSearchResult[], limit: number) {
