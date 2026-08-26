@@ -3,6 +3,23 @@ import { RagService, RagSearchResult } from './rag.service';
 const result = (chunkId: string, score = 0, documentId = chunkId): RagSearchResult => ({ chunkId, documentId, title: chunkId, category: 'GENERAL', chunkText: chunkId, score });
 
 describe('RagService RRF 후보 결합', () => {
+  it('PostgreSQL FTS와 GIN 인덱스로 lexical 후보를 조회한다', async () => {
+    const chunks = { query: jest.fn(async (..._args: unknown[]) => [result('fts-result', 0.8)]) };
+    const dataSource = { query: jest.fn(async (..._args: unknown[]) => undefined) };
+    const service = Object.create(RagService.prototype) as {
+      chunks: typeof chunks;
+      dataSource: typeof dataSource;
+      lexicalSearch: (question: string, limit: number, category?: string) => Promise<RagSearchResult[]>;
+    };
+    service.chunks = chunks;
+    service.dataSource = dataSource;
+
+    await expect(service.lexicalSearch('지원 일정', 4)).resolves.toEqual([result('fts-result', 0.8)]);
+    expect(dataSource.query).toHaveBeenCalledWith(expect.stringContaining('USING GIN'));
+    expect(chunks.query).toHaveBeenCalledWith(expect.stringContaining("websearch_to_tsquery('simple', $1)"), ['지원 일정', 4, null]);
+    expect(chunks.query.mock.calls[0][0]).not.toContain('.take(150)');
+  });
+
   it('벡터와 키워드 후보에 모두 있는 chunk를 우선한다', () => {
     const service = Object.create(RagService.prototype) as { mergeSearchResults: (vector: RagSearchResult[], lexical: RagSearchResult[], limit: number) => RagSearchResult[] };
     const results = service.mergeSearchResults([result('vector-only'), result('shared')], [result('lexical-only'), result('shared')], 4);
