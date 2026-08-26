@@ -12,6 +12,8 @@ import { DocumentChunk } from './ai/entities/document-chunk.entity';
 import { KnowledgeDocument } from './ai/entities/knowledge-document.entity';
 import { AiQuestion } from './ai/entities/ai-question.entity';
 import { Faq } from './ai/entities/faq.entity';
+import { RagReindexJob } from './ai/entities/rag-reindex-job.entity';
+import { RagReindexJobItem } from './ai/entities/rag-reindex-job-item.entity';
 import { AppController } from './app.controller';
 
 @Module({
@@ -38,6 +40,8 @@ import { AppController } from './app.controller';
           DocumentChunk,
           AiQuestion,
           Faq,
+          RagReindexJob,
+          RagReindexJobItem,
         ],
         synchronize: config.get<string>('TYPEORM_SYNC') !== 'false',
       }),
