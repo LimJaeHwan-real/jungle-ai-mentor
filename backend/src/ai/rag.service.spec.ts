@@ -216,4 +216,28 @@ describe('RagService 안전한 강제 재색인', () => {
     await expect(service.indexDocument(dto)).rejects.toBeInstanceOf(ServiceUnavailableException);
     expect(save).toHaveBeenCalledWith(expect.objectContaining({ indexStatus: 'FAILED', indexErrorCode: 'EMBEDDING_UNAVAILABLE' }));
   });
+
+  it('문서 메타데이터가 같아도 chunk가 없거나 비호환이면 재색인 대상으로 찾는다', () => {
+    const conditions: string[] = [];
+    const innerQuery = {
+      where: jest.fn((condition: string) => { conditions.push(condition); return innerQuery; }),
+      orWhere: jest.fn((condition: string) => { conditions.push(condition); return innerQuery; }),
+    };
+    const builder = {
+      where: jest.fn((brackets: { whereFactory: (query: typeof innerQuery) => void }) => { brackets.whereFactory(innerQuery); return builder; }),
+      orderBy: jest.fn(() => builder),
+    };
+    const service = Object.create(RagService.prototype) as any;
+    Object.assign(service, {
+      documents: { createQueryBuilder: jest.fn(() => builder) },
+      embeddings: { getMetadata: () => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 }) },
+    });
+
+    service.reindexTargetQuery();
+    expect(conditions).toEqual(expect.arrayContaining([
+      expect.stringContaining('NOT EXISTS (SELECT 1 FROM document_chunks'),
+      expect.stringContaining('c."embeddingModel" IS DISTINCT FROM :model'),
+      expect.stringContaining('c."chunkingVersion" IS DISTINCT FROM :chunkingVersion'),
+    ]));
+  });
 });

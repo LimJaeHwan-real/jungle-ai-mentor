@@ -482,7 +482,20 @@ export class RagService {
             .orWhere('document."embeddingMode" != :mode', { mode: expectedEmbedding.mode })
             .orWhere('document."embeddingVersion" != :version', { version: expectedEmbedding.version })
             .orWhere('document."embeddingDimension" != :dimension', { dimension: expectedEmbedding.dimension })
-            .orWhere('document."chunkingVersion" != :chunkingVersion', { chunkingVersion: RAG_CHUNKING_VERSION });
+            .orWhere('document."chunkingVersion" != :chunkingVersion', { chunkingVersion: RAG_CHUNKING_VERSION })
+            .orWhere('NOT EXISTS (SELECT 1 FROM document_chunks c WHERE c."documentId" = document.id)')
+            .orWhere(`EXISTS (
+              SELECT 1 FROM document_chunks c
+              WHERE c."documentId" = document.id
+                AND (c.embedding IS NULL
+                  OR c."indexStatus" IS DISTINCT FROM :active
+                  OR c."embeddingProvider" IS DISTINCT FROM :provider
+                  OR c."embeddingModel" IS DISTINCT FROM :model
+                  OR c."embeddingMode" IS DISTINCT FROM :mode
+                  OR c."embeddingVersion" IS DISTINCT FROM :version
+                  OR c."embeddingDimension" IS DISTINCT FROM :dimension
+                  OR c."chunkingVersion" IS DISTINCT FROM :chunkingVersion)
+            )`);
         }),
       )
       .orderBy('document.updatedAt', 'DESC');
