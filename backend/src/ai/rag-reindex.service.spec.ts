@@ -42,6 +42,23 @@ describe('RagReindexService', () => {
     expect(manager.query).toHaveBeenCalledWith(expect.stringContaining('ON CONFLICT ("documentId") WHERE status IN (\'PENDING\', \'RUNNING\') DO NOTHING'), expect.any(Array));
   });
 
+  it('PostgreSQL UPDATE 반환 행에서 선점 항목을 꺼내 작업 상태를 RUNNING으로 바꾼다', async () => {
+    const { service, manager } = createService();
+    const claimed = { id: 'item-1', jobId: 'job-1', documentId: 'document-1' };
+    (manager.query as jest.Mock).mockResolvedValueOnce([[claimed], 1]).mockResolvedValueOnce([[], 1]);
+
+    await expect((service as any).claimNextItem()).resolves.toEqual(claimed);
+    expect(manager.query).toHaveBeenNthCalledWith(2, expect.stringContaining("SET status = 'RUNNING'"), ['job-1']);
+  });
+
+  it('대기 항목이 없으면 작업 상태를 갱신하지 않는다', async () => {
+    const { service, manager } = createService();
+    (manager.query as jest.Mock).mockResolvedValueOnce([[], 0]);
+
+    await expect((service as any).claimNextItem()).resolves.toBeUndefined();
+    expect(manager.query).toHaveBeenCalledTimes(1);
+  });
+
   it('성공한 항목은 성공으로 완료 처리하고, embedding 실패는 안전한 오류로 기록한다', async () => {
     const { service, rag } = createService();
     const complete = jest.spyOn(service as any, 'completeItem').mockResolvedValue(undefined);

@@ -121,7 +121,7 @@ export class RagReindexService implements OnModuleInit {
 
   private async claimNextItem(): Promise<ClaimedItem | undefined> {
     return this.dataSource.transaction(async (manager) => {
-      const rows = (await manager.query(
+      const [rows] = (await manager.query(
         `WITH candidate AS (
            SELECT id
            FROM rag_reindex_job_items
@@ -135,7 +135,7 @@ export class RagReindexService implements OnModuleInit {
          FROM candidate
          WHERE item.id = candidate.id
          RETURNING item.id, item."jobId" AS "jobId", item."documentId" AS "documentId"`,
-      )) as ClaimedItem[];
+      )) as [ClaimedItem[], number];
       const item = rows[0];
       if (!item) return undefined;
       await manager.query(
