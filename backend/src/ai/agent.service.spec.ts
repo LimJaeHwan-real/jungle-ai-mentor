@@ -33,6 +33,7 @@ describe('AgentService 검색 장애 처리', () => {
     expect(response.retrievalStatus).toBe('INSUFFICIENT_EVIDENCE');
     expect(response.answer).toContain('등록된 근거');
     expect(response.references).not.toContainEqual(expect.objectContaining({ sourceUrl: 'https://example.com' }));
+    expect(response.externalAugmentationStatus).toBe('SEARCHED_NOT_USED');
     expect(llm.answer).not.toHaveBeenCalled();
   });
 
@@ -52,12 +53,12 @@ describe('AgentService 검색 장애 처리', () => {
   });
 
   it('명시적으로 허용한 블로그 보강도 재검색에서 채택한 근거만 답변에 사용한다', async () => {
-    const selected = { chunkId: 'selected-chunk', title: '정글 후기', chunkText: '정글 과정은 팀 프로젝트를 포함합니다.', category: 'BLOG', sourceUrl: 'https://example.com/selected', sectionPath: '과정 > 프로젝트', sourceStart: 15, sourceEnd: 39, chunkingVersion: 'markdown-cl100k-256-v2', score: 0.3 };
+    const selected = { chunkId: 'selected-chunk', documentId: 'selected-document', title: '정글 후기', chunkText: '정글 과정은 팀 프로젝트를 포함합니다.', category: 'BLOG', sourceUrl: 'https://example.com/selected', sectionPath: '과정 > 프로젝트', sourceStart: 15, sourceEnd: 39, chunkingVersion: 'markdown-cl100k-256-v2', score: 0.3 };
     const rag = { searchWithStatus: jest.fn()
       .mockResolvedValueOnce({ results: [], status: 'INSUFFICIENT_EVIDENCE' })
       .mockResolvedValueOnce({ results: [selected], status: 'SUFFICIENT_EVIDENCE' }) };
     const llm = { answer: jest.fn(async () => '팀 프로젝트가 포함됩니다. [1]') };
-    const blogSearch = { discoverAndImport: jest.fn(async () => ({ mode: 'hybrid', query: '정글', importedCount: 1, references: [{ sourceUrl: 'https://example.com/unselected', imported: true }] })) };
+    const blogSearch = { discoverAndImport: jest.fn(async () => ({ mode: 'hybrid', query: '정글', importedCount: 1, references: [{ sourceUrl: 'https://example.com/selected', documentId: 'selected-document', imported: true }] })) };
     const service = new AgentService(questions() as never, rag as never, {} as never, {} as never, llm as never, blogSearch as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '정글 과정에 팀 프로젝트가 있나요?', autoBlogSearch: true });
@@ -65,12 +66,29 @@ describe('AgentService 검색 장애 처리', () => {
     expect(blogSearch.discoverAndImport).toHaveBeenCalledTimes(1);
     expect(rag.searchWithStatus).toHaveBeenCalledTimes(2);
     expect(response.retrievalStatus).toBe('SUFFICIENT_EVIDENCE');
+    expect(response.externalAugmentationStatus).toBe('EVIDENCE_USED');
     expect(response.references).toEqual([selected]);
     expect(llm.answer).toHaveBeenCalledWith(
       '정글 과정에 팀 프로젝트가 있나요?',
       [expect.objectContaining({ title: selected.title, content: selected.chunkText, sourceUrl: selected.sourceUrl, chunkId: selected.chunkId, sectionPath: selected.sectionPath, sourceStart: selected.sourceStart, sourceEnd: selected.sourceEnd })],
       expect.any(String),
     );
+  });
+
+  it('외부 블로그 검색 자체가 실패해도 내부 근거 부족 상태를 안전하게 반환한다', async () => {
+    const rag = { searchWithStatus: jest.fn(async () => ({ results: [], status: 'INSUFFICIENT_EVIDENCE' })) };
+    const llm = { answer: jest.fn() };
+    const blogSearch = { discoverAndImport: jest.fn(async () => { throw new Error('external search failed'); }) };
+    const service = new AgentService(questions() as never, rag as never, {} as never, {} as never, llm as never, blogSearch as never);
+
+    const response = await service.ask({ id: 'user-1' } as never, { question: '정글 준비 방법 알려줘', autoBlogSearch: true });
+
+    expect(response.retrievalStatus).toBe('INSUFFICIENT_EVIDENCE');
+    expect(response.externalAugmentationStatus).toBe('FAILED');
+    expect(response.answer).toContain('등록된 근거');
+    expect(response.references).toEqual([]);
+    expect(rag.searchWithStatus).toHaveBeenCalledTimes(1);
+    expect(llm.answer).not.toHaveBeenCalled();
   });
 
   it('근거 번호가 없거나 범위를 벗어난 생성 답변은 표시하지 않는다', async () => {

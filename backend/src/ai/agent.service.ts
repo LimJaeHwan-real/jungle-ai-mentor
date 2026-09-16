@@ -49,6 +49,7 @@ export class AgentService {
       usedTools.push('RAG_SEARCH_TOOL');
       let retrieval = await this.rag.searchWithStatus(dto.question);
       let results = retrieval.results;
+      let externalAugmentationStatus: 'NOT_REQUESTED' | 'SEARCHED_NOT_USED' | 'EVIDENCE_USED' | 'FAILED' | 'DISABLED' = 'NOT_REQUESTED';
       state.ragFirst = {
         resultCount: results.length,
         topScore: results[0]?.score,
@@ -56,18 +57,33 @@ export class AgentService {
       };
       if (dto.autoBlogSearch === true && retrieval.status === 'INSUFFICIENT_EVIDENCE') {
         usedTools.push('BLOG_SEARCH_TOOL');
-        const blogSearch = await this.blogSearch.discoverAndImport(dto.question);
-        state.blogSearch = {
-          mode: blogSearch.mode,
-          query: blogSearch.query,
-          importedCount: blogSearch.importedCount,
-          resultCount: blogSearch.references.length,
-          reason: 'rag_results_insufficient',
-        };
-        retrieval = await this.rag.searchWithStatus(dto.question, 6);
-        results = retrieval.results;
+        const blogSearch = await this.blogSearch.discoverAndImport(dto.question).catch(() => undefined);
+        if (!blogSearch) {
+          externalAugmentationStatus = 'FAILED';
+          state.blogSearch = { reason: 'external_search_failed' };
+        } else {
+          state.blogSearch = {
+            mode: blogSearch.mode,
+            query: blogSearch.query,
+            importedCount: blogSearch.importedCount,
+            resultCount: blogSearch.references.length,
+            reason: 'rag_results_insufficient',
+          };
+          if (blogSearch.mode === 'off') {
+            externalAugmentationStatus = 'DISABLED';
+          } else {
+            externalAugmentationStatus = 'SEARCHED_NOT_USED';
+            retrieval = await this.rag.searchWithStatus(dto.question, 6);
+            results = retrieval.results;
+            const discoveredDocumentIds = new Set(blogSearch.references.flatMap((reference) => reference.documentId ? [reference.documentId] : []));
+            if (retrieval.status === 'SUFFICIENT_EVIDENCE' && results.some((result) => discoveredDocumentIds.has(result.documentId))) {
+              externalAugmentationStatus = 'EVIDENCE_USED';
+            }
+          }
+        }
       }
 
+      state.externalAugmentationStatus = externalAugmentationStatus;
       state.retrievalStatus = retrieval.status;
       if (retrieval.status === 'SEARCH_DEGRADED' || retrieval.status === 'NO_ACTIVE_INDEX') {
         references = [];
@@ -152,6 +168,7 @@ export class AgentService {
       agentRoute: question.agentRoute,
       agentState: question.agentState,
       retrievalStatus: question.agentState.retrievalStatus,
+      externalAugmentationStatus: question.agentState.externalAugmentationStatus,
       references,
       isPublic: question.isPublic,
       createdAt: question.createdAt,

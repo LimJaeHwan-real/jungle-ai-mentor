@@ -108,6 +108,14 @@ export function AskPage() {
             <div className="tool-row">
               <span className="route-badge">{answer.agentRoute}</span>
               {answer.retrievalStatus && <span className="tag-pill">검색 상태: {answer.retrievalStatus}</span>}
+              {answer.externalAugmentationStatus && answer.externalAugmentationStatus !== 'NOT_REQUESTED' && (
+                <span className="tag-pill">외부 보강: {{
+                  SEARCHED_NOT_USED: '검색했지만 답변 근거로 사용 안 함',
+                  EVIDENCE_USED: '답변 근거로 사용',
+                  FAILED: '검색 실패',
+                  DISABLED: '서버 설정으로 꺼짐',
+                }[answer.externalAugmentationStatus]}</span>
+              )}
               {answer.usedTools.map((tool) => (
                 <span className="tag-pill" key={tool}>
                   {tool}

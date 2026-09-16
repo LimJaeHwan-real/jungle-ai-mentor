@@ -65,6 +65,7 @@ export interface AiAnswer {
   agentRoute: string;
   agentState: Record<string, unknown>;
   retrievalStatus?: 'SUFFICIENT_EVIDENCE' | 'INSUFFICIENT_EVIDENCE' | 'NO_ACTIVE_INDEX' | 'SEARCH_DEGRADED';
+  externalAugmentationStatus?: 'NOT_REQUESTED' | 'SEARCHED_NOT_USED' | 'EVIDENCE_USED' | 'FAILED' | 'DISABLED';
   references: AiReference[];
   isPublic: boolean;
   createdAt: string;
