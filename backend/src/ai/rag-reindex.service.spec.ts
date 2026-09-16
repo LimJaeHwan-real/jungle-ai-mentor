@@ -29,6 +29,7 @@ describe('RagReindexService', () => {
     const rag = {
       findReindexTargetDocuments: jest.fn(async () => [{ id: 'document-1' }]),
       reindexDocument: jest.fn(async () => undefined),
+      getChunkingVersion: jest.fn(() => 'markdown-cl100k-256-v2'),
     };
     const embeddings = { getMetadata: jest.fn(() => ({ model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 })) };
     return { service: new RagReindexService(jobs as any, items as any, dataSource as any, rag as any, embeddings as any), jobs, items, manager, dataSource, rag };
@@ -40,6 +41,7 @@ describe('RagReindexService', () => {
 
     await expect(service.createJob(['document-1'])).resolves.toMatchObject({ targetCount: 0, duplicateCount: 1 });
     expect(manager.query).toHaveBeenCalledWith(expect.stringContaining('ON CONFLICT ("documentId") WHERE status IN (\'PENDING\', \'RUNNING\') DO NOTHING'), expect.any(Array));
+    expect(manager.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ chunkingVersion: 'markdown-cl100k-256-v2' }));
   });
 
   it('PostgreSQL UPDATE 반환 행에서 선점 항목을 꺼내 작업 상태를 RUNNING으로 바꾼다', async () => {

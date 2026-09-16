@@ -47,6 +47,7 @@ export class RagReindexService implements OnModuleInit {
           embeddingMode: metadata.mode,
           embeddingVersion: metadata.version,
           embeddingDimension: metadata.dimension,
+          chunkingVersion: this.rag.getChunkingVersion(),
         }),
       );
       let queuedCount = 0;
@@ -89,6 +90,7 @@ export class RagReindexService implements OnModuleInit {
         mode: job.embeddingMode,
         version: job.embeddingVersion,
         dimension: job.embeddingDimension,
+        chunkingVersion: job.chunkingVersion,
       },
       startedAt: job.startedAt,
       finishedAt: job.finishedAt,

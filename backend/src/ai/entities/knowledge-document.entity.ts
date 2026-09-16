@@ -51,6 +51,9 @@ export class KnowledgeDocument {
   @Column({ type: 'varchar', nullable: true })
   indexErrorCode?: string | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  chunkingVersion?: string | null;
+
   @OneToMany(() => DocumentChunk, (chunk) => chunk.document)
   chunks: DocumentChunk[];
 

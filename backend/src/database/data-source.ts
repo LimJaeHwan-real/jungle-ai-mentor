@@ -12,6 +12,7 @@ import { CreateRagReindexJobs1787721000000 } from './migrations/1787721000000-Cr
 import { RagReindexJob } from '../ai/entities/rag-reindex-job.entity';
 import { RagReindexJobItem } from '../ai/entities/rag-reindex-job-item.entity';
 import { AddRagEmbeddingMetadata1787722000000 } from './migrations/1787722000000-AddRagEmbeddingMetadata';
+import { AddRagChunkProvenance1787723000000 } from './migrations/1787723000000-AddRagChunkProvenance';
 
 export default new DataSource({
   type: 'postgres',
@@ -21,7 +22,7 @@ export default new DataSource({
   password: process.env.DB_PASSWORD ?? 'jungle',
   database: process.env.DB_NAME ?? 'jungle_ai_mentor',
   entities: [User, Post, Comment, Tag, KnowledgeDocument, DocumentChunk, AiQuestion, Faq, RagReindexJob, RagReindexJobItem],
-  migrations: [CreateRagFtsGinIndexes1787719500000, CreateRagReindexJobs1787721000000, AddRagEmbeddingMetadata1787722000000],
+  migrations: [CreateRagFtsGinIndexes1787719500000, CreateRagReindexJobs1787721000000, AddRagEmbeddingMetadata1787722000000, AddRagChunkProvenance1787723000000],
   migrationsTableName: 'typeorm_migrations',
   synchronize: false,
 });

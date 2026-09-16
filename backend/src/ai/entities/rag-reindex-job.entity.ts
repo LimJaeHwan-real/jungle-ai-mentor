@@ -34,6 +34,9 @@ export class RagReindexJob {
   @Column({ type: 'integer', nullable: true })
   embeddingDimension?: number | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  chunkingVersion?: string | null;
+
   @Column({ type: 'timestamp', nullable: true })
   startedAt?: Date | null;
 

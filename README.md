@@ -32,9 +32,10 @@ React, NestJS, PostgreSQL, pgvector 기반의 AI 학습 커뮤니티 게시판 M
 1. `POST /api/admin/documents`로 문서를 등록합니다.
 2. 백엔드가 문서를 chunk로 나누고 embedding을 생성합니다.
 3. OpenAI Embeddings를 사용할 수 있으면 실제 embedding을 생성합니다.
-4. 외부 API를 사용할 수 없으면 deterministic mock embedding을 사용합니다.
-5. 검색 시 pgvector distance query를 먼저 시도하고, 실패하면 lexical fallback을 사용합니다.
-6. `/api/ai/ask`는 AgentService를 거쳐 `RAG_SEARCH_TOOL`을 선택할 수 있습니다.
+4. `RAG_EMBEDDING_MODE=mock`을 demo/local에서 명시적으로 설정한 경우에만 deterministic mock embedding을 사용합니다. production에서는 실제 임베딩 실패를 mock으로 바꾸지 않습니다.
+5. Markdown 구조를 보존하며 실제 토큰 수로 chunk를 나누고, 색인 버전과 출처를 저장합니다.
+6. 검색 시 pgvector와 PostgreSQL 전문 검색 후보를 결합합니다. 검색 장애 상태에서는 신뢰할 수 있는 RAG 답변을 생성하지 않습니다.
+7. `/api/ai/ask`는 AgentService를 거쳐 `RAG_SEARCH_TOOL`을 선택할 수 있습니다.
 
 ## MCP 구조
 - API: `POST /api/mcp/github/analyze`

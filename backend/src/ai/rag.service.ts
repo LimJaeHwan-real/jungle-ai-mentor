@@ -8,6 +8,7 @@ import { KnowledgeDocument } from './entities/knowledge-document.entity';
 import { EmbeddingService } from './embedding.service';
 import { RagMetricsService } from './rag-metrics.service';
 import { chunkTextFtsExpression, documentTitleFtsExpression } from '../database/fts-expressions';
+import { chunkMarkdown, MarkdownChunk, RAG_CHUNKING_VERSION } from './utils/markdown-chunker';
 
 export interface RagSearchResult {
   chunkId: string;
@@ -48,13 +49,13 @@ export interface RagReindexTarget {
   embeddingMode?: string;
   embeddingVersion?: string;
   embeddingDimension?: number;
+  chunkingVersion?: string;
   updatedAt: Date;
 }
 
 @Injectable()
 export class RagService {
-  private readonly chunkSize = 700;
-  private readonly chunkOverlap = 120;
+  private readonly chunkTokenLimit = 256;
 
   constructor(
     @InjectRepository(KnowledgeDocument) private readonly documents: Repository<KnowledgeDocument>,
@@ -76,7 +77,8 @@ export class RagService {
     if (existing?.contentHash === contentHash && existing.indexStatus === 'ACTIVE'
       && existing.embeddingProvider === metadata.provider && existing.embeddingModel === metadata.model
       && existing.embeddingMode === metadata.mode && existing.embeddingVersion === metadata.version
-      && existing.embeddingDimension === metadata.dimension && !options.force) {
+      && existing.embeddingDimension === metadata.dimension
+      && existing.chunkingVersion === RAG_CHUNKING_VERSION && !options.force) {
       const chunkCount = await this.chunks.count({ where: { documentId: existing.id } });
       const result: RagIndexResult = {
         id: existing.id,
@@ -120,6 +122,7 @@ export class RagService {
         embeddingProvider: metadata.provider, embeddingModel: metadata.model, embeddingMode: metadata.mode,
         embeddingVersion: metadata.version, embeddingDimension: metadata.dimension,
         embeddingGeneratedAt: new Date(Math.max(...vectors.map((vector) => vector.generatedAt.getTime()))),
+        chunkingVersion: RAG_CHUNKING_VERSION,
     });
     const savedDocument = await this.dataSource.transaction(async (manager) => {
       const saved = await manager.save(KnowledgeDocument, document);
@@ -132,7 +135,7 @@ export class RagService {
           sectionPath: chunk.sectionPath,
           sourceStart: chunk.sourceStart,
           sourceEnd: chunk.sourceEnd,
-          tokenCount: Math.ceil(chunk.chunkText.length / 4),
+          tokenCount: chunk.tokenCount,
           embedding: vectors[index].embedding,
           embeddingProvider: metadata.provider,
           embeddingModel: metadata.model,
@@ -143,6 +146,9 @@ export class RagService {
           indexedAt,
           indexStatus: 'ACTIVE',
           indexErrorCode: null,
+          chunkingVersion: RAG_CHUNKING_VERSION,
+          documentTitle: dto.title,
+          sourceUrl: dto.sourceUrl ?? null,
         }),
       );
       await manager.save(DocumentChunk, chunks);
@@ -175,6 +181,8 @@ export class RagService {
       { force: true },
     );
   }
+
+  getChunkingVersion() { return RAG_CHUNKING_VERSION; }
 
   async search(question: string, limit = 4): Promise<RagSearchResult[]> {
     return (await this.searchWithStatus(question, limit)).results;
@@ -234,7 +242,7 @@ export class RagService {
     const expectedEmbedding = this.embeddings.getMetadata();
     const documents = await this.reindexTargetQuery().take(limit).getMany();
 
-    return { expectedEmbedding, count: documents.length, documents: documents.map((document) => this.toReindexTarget(document)) };
+    return { expectedEmbedding, expectedChunkingVersion: RAG_CHUNKING_VERSION, count: documents.length, documents: documents.map((document) => this.toReindexTarget(document)) };
   }
 
   async findReindexTargetDocuments(documentIds?: string[]) {
@@ -412,6 +420,7 @@ export class RagService {
       embeddingMode: document.embeddingMode,
       embeddingVersion: document.embeddingVersion,
       embeddingDimension: document.embeddingDimension,
+      chunkingVersion: document.chunkingVersion ?? undefined,
       updatedAt: document.updatedAt,
     };
   }
@@ -429,65 +438,19 @@ export class RagService {
             .orWhere('document."embeddingMode" IS NULL')
             .orWhere('document."embeddingVersion" IS NULL')
             .orWhere('document."embeddingDimension" IS NULL')
+            .orWhere('document."chunkingVersion" IS NULL')
             .orWhere('document."embeddingModel" != :model', { model: expectedEmbedding.model })
             .orWhere('document."embeddingProvider" != :provider', { provider: expectedEmbedding.provider })
             .orWhere('document."embeddingMode" != :mode', { mode: expectedEmbedding.mode })
             .orWhere('document."embeddingVersion" != :version', { version: expectedEmbedding.version })
-            .orWhere('document."embeddingDimension" != :dimension', { dimension: expectedEmbedding.dimension });
+            .orWhere('document."embeddingDimension" != :dimension', { dimension: expectedEmbedding.dimension })
+            .orWhere('document."chunkingVersion" != :chunkingVersion', { chunkingVersion: RAG_CHUNKING_VERSION });
         }),
       )
       .orderBy('document.updatedAt', 'DESC');
   }
 
-  splitText(content: string): Array<{ chunkText: string; sectionPath?: string; sourceStart: number; sourceEnd: number }> {
-    const normalized = content.replace(/\r\n/g, '\n').trim();
-    if (!normalized) return [];
-
-    const chunks: Array<{ chunkText: string; sectionPath?: string; sourceStart: number; sourceEnd: number }> = [];
-    const headingStarts = [...normalized.matchAll(/^#{1,6}\s+.+$/gm)].map((heading) => heading.index ?? 0);
-    const boundaries = [...new Set([0, ...headingStarts, normalized.length])].sort((a, b) => a - b);
-
-    for (let boundary = 0; boundary < boundaries.length - 1; boundary += 1) {
-      const rangeStart = boundaries[boundary];
-      const rangeEnd = boundaries[boundary + 1];
-      let start = rangeStart;
-      while (start < rangeEnd) {
-        const hardEnd = Math.min(start + this.chunkSize, rangeEnd);
-        const slice = normalized.slice(start, hardEnd);
-        const paragraphBreak = slice.lastIndexOf('\n\n');
-        const sentenceBreak = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('! '), slice.lastIndexOf('? '));
-        const candidate =
-          paragraphBreak > this.chunkSize * 0.45
-            ? paragraphBreak
-            : sentenceBreak > this.chunkSize * 0.45
-              ? sentenceBreak + 1
-              : slice.length;
-        const softEnd = hardEnd === rangeEnd ? hardEnd : start + candidate;
-        const chunkText = normalized.slice(start, softEnd).trim();
-        if (chunkText) chunks.push({ chunkText, sectionPath: this.sectionPathAt(normalized, start), sourceStart: start, sourceEnd: softEnd });
-        if (softEnd >= rangeEnd) break;
-        start = Math.max(softEnd - this.chunkOverlap, start + 1);
-      }
-    }
-
-    const seen = new Set<string>();
-    return chunks.filter((chunk) => {
-      const key = chunk.chunkText.replace(/\s+/g, ' ').trim();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }
-
-  private sectionPathAt(content: string, position: number) {
-    const headings = [...content.matchAll(/^(#{1,6})\s+(.+)$/gm)].filter((heading) => (heading.index ?? 0) <= position);
-    if (!headings.length) return undefined;
-    const path: string[] = [];
-    for (const heading of headings) {
-      const level = heading[1].length;
-      path.splice(level - 1);
-      path[level - 1] = heading[2].trim();
-    }
-    return path.filter(Boolean).join(' > ');
+  splitText(content: string): MarkdownChunk[] {
+    return chunkMarkdown(content, this.chunkTokenLimit ?? 256);
   }
 }

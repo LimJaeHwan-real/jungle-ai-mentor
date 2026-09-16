@@ -58,6 +58,15 @@ export class DocumentChunk {
   @Column({ type: 'varchar', nullable: true })
   indexErrorCode?: string | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  chunkingVersion?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  documentTitle?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  sourceUrl?: string | null;
+
   @Column({ default: 0 })
   tokenCount: number;
 
