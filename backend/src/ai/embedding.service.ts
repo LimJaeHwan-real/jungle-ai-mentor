@@ -25,30 +25,61 @@ export class EmbeddingService implements OnModuleInit {
       throw new ServiceUnavailableException('임베딩 서비스를 사용할 수 없습니다. 명시적 demo/local mock 모드가 아닌 경우 mock으로 전환하지 않습니다.');
     }
 
-    try {
-      const response = await fetch('https://api.openai.com/v1/embeddings', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: this.config.get<string>('OPENAI_EMBEDDING_MODEL') ?? 'text-embedding-3-small',
-          input: text,
-        }),
-      });
+    for (let attempt = 0; attempt <= 2; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      let retryable = false;
 
-      if (!response.ok) throw new ServiceUnavailableException(`임베딩 서비스 요청이 실패했습니다(${response.status}).`);
+      try {
+        const response = await fetch('https://api.openai.com/v1/embeddings', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: this.config.get<string>('OPENAI_EMBEDDING_MODEL') ?? 'text-embedding-3-small',
+            input: text,
+          }),
+          signal: controller.signal,
+        });
 
-      const data = (await response.json()) as { data?: Array<{ embedding: number[] }> };
-      const embedding = data.data?.[0]?.embedding;
-      if (!embedding || embedding.length !== this.dimension || embedding.some((value) => !Number.isFinite(value))) {
-        throw new ServiceUnavailableException('임베딩 응답의 차원이 설정값과 다르거나 유효하지 않습니다.');
+        if (!response.ok) {
+          if (response.status !== 429 && (response.status < 500 || response.status >= 600)) {
+            throw new ServiceUnavailableException('임베딩 서비스 요청이 거부되었습니다. mock으로 자동 전환하지 않습니다.');
+          }
+          retryable = true;
+        } else {
+          let data: { data?: Array<{ embedding?: unknown }> } | null;
+          try {
+            data = (await response.json()) as typeof data;
+          } catch (error) {
+            if (error instanceof SyntaxError) {
+              throw new ServiceUnavailableException('임베딩 응답 형식이 유효하지 않습니다.');
+            }
+            throw error;
+          }
+          const embedding = data?.data?.[0]?.embedding;
+          if (!Array.isArray(embedding) || embedding.length !== this.dimension || embedding.some((value) => !Number.isFinite(value))) {
+            throw new ServiceUnavailableException('임베딩 응답의 차원이 설정값과 다르거나 유효하지 않습니다.');
+          }
+          return embedding;
+        }
+      } catch (error) {
+        if (error instanceof ServiceUnavailableException) throw error;
+        if (!(error instanceof TypeError) && !controller.signal.aborted) {
+          throw new ServiceUnavailableException('임베딩 서비스를 사용할 수 없습니다. mock으로 자동 전환하지 않습니다.');
+        }
+        retryable = true;
+      } finally {
+        clearTimeout(timeout);
       }
-      return embedding;
-    } catch {
-      throw new ServiceUnavailableException('임베딩 서비스를 사용할 수 없습니다. mock으로 자동 전환하지 않습니다.');
+
+      if (!retryable || attempt === 2) break;
+      await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
     }
+
+    throw new ServiceUnavailableException('임베딩 서비스를 사용할 수 없습니다. mock으로 자동 전환하지 않습니다.');
   }
 
   getMetadata() { return { mode: this.mode(), model: this.mode() === 'mock' ? 'deterministic-demo' : this.config.get<string>('OPENAI_EMBEDDING_MODEL') ?? 'text-embedding-3-small', dimension: this.dimension, version: this.config.get<string>('RAG_EMBEDDING_VERSION') ?? 'v1' }; }
