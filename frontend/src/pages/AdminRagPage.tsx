@@ -14,6 +14,18 @@ interface RagMetrics {
     recentDurationCount: number;
   };
   indexing: { created: number; updated: number; skipped: number; failed: number };
+  embedding: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    retries: number;
+    p95DurationMs: number | null;
+    recentDurationCount: number;
+    provider: string | null;
+    model: string | null;
+    mode: string | null;
+    dimension: number | null;
+  };
 }
 
 interface ReindexTargets {
@@ -76,14 +88,23 @@ export function AdminRagPage() {
         {metrics.isPending && <p className="loading">지표를 불러오는 중입니다.</p>}
         {metrics.error && <p className="error-text">{getErrorMessage(metrics.error)}</p>}
         {metrics.data && (
-          <div className="faq-grid">
-            <article className="faq-card"><span>검색 요청</span><strong>{metrics.data.searches.total}건</strong></article>
-            <article className="faq-card"><span>근거 충분 / 부족</span><strong>{metrics.data.searches.sufficientEvidence} / {metrics.data.searches.insufficientEvidence}건</strong></article>
-            <article className="faq-card"><span>검색 장애 / 활성 색인 없음</span><strong>{metrics.data.searches.degraded} / {metrics.data.searches.noActiveIndex}건</strong></article>
-            <article className="faq-card"><span>최근 {metrics.data.searches.recentDurationCount}건 검색 지연 p95</span><strong>{metrics.data.searches.p95DurationMs === null ? '측정 전' : `${metrics.data.searches.p95DurationMs}ms`}</strong></article>
-            <article className="faq-card"><span>색인 생성 / 갱신</span><strong>{metrics.data.indexing.created} / {metrics.data.indexing.updated}건</strong></article>
-            <article className="faq-card"><span>색인 실패 / 건너뜀</span><strong>{metrics.data.indexing.failed} / {metrics.data.indexing.skipped}건</strong></article>
-          </div>
+          <>
+            <div className="faq-grid">
+              <article className="faq-card"><span>검색 요청</span><strong>{metrics.data.searches.total}건</strong></article>
+              <article className="faq-card"><span>근거 충분 / 부족</span><strong>{metrics.data.searches.sufficientEvidence} / {metrics.data.searches.insufficientEvidence}건</strong></article>
+              <article className="faq-card"><span>검색 장애 / 활성 색인 없음</span><strong>{metrics.data.searches.degraded} / {metrics.data.searches.noActiveIndex}건</strong></article>
+              <article className="faq-card"><span>최근 {metrics.data.searches.recentDurationCount}건 검색 지연 p95</span><strong>{metrics.data.searches.p95DurationMs === null ? '측정 전' : `${metrics.data.searches.p95DurationMs}ms`}</strong></article>
+              <article className="faq-card"><span>색인 생성 / 갱신</span><strong>{metrics.data.indexing.created} / {metrics.data.indexing.updated}건</strong></article>
+              <article className="faq-card"><span>색인 실패 / 건너뜀</span><strong>{metrics.data.indexing.failed} / {metrics.data.indexing.skipped}건</strong></article>
+            </div>
+            <h3>임베딩 서비스</h3>
+            <p className="muted-line">{metrics.data.embedding.provider ?? '제공자 미확인'} / {metrics.data.embedding.model ?? '모델 미확인'} / {metrics.data.embedding.mode ?? '모드 미확인'} / {metrics.data.embedding.dimension === null ? '차원 미확인' : `${metrics.data.embedding.dimension}차원`}</p>
+            <div className="faq-grid">
+              <article className="faq-card"><span>요청 / 성공 / 실패</span><strong>{metrics.data.embedding.total} / {metrics.data.embedding.succeeded} / {metrics.data.embedding.failed}건</strong></article>
+              <article className="faq-card"><span>재시도</span><strong>{metrics.data.embedding.retries}회</strong></article>
+              <article className="faq-card"><span>최근 {metrics.data.embedding.recentDurationCount}건 임베딩 지연 p95</span><strong>{metrics.data.embedding.p95DurationMs === null ? '측정 전' : `${metrics.data.embedding.p95DurationMs}ms`}</strong></article>
+            </div>
+          </>
         )}
       </section>
 

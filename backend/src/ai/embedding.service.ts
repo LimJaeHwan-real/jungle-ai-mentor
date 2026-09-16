@@ -1,12 +1,13 @@
 import { Injectable, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
+import { RagMetricsService } from './rag-metrics.service';
 
 @Injectable()
 export class EmbeddingService implements OnModuleInit {
   private readonly dimension: number;
 
-  constructor(private readonly config: ConfigService) {
+  constructor(private readonly config: ConfigService, private readonly metrics: RagMetricsService) {
     this.dimension = Number(this.config.get<string>('RAG_EMBEDDING_DIMENSION') ?? 1536);
   }
 
@@ -24,6 +25,19 @@ export class EmbeddingService implements OnModuleInit {
   }
 
   async embed(text: string): Promise<number[]> {
+    const startedAt = Date.now();
+    this.metrics.recordEmbeddingRequest(this.getMetadata());
+    try {
+      const embedding = await this.createEmbedding(text);
+      this.metrics.recordEmbeddingResult(true, Date.now() - startedAt);
+      return embedding;
+    } catch (error) {
+      this.metrics.recordEmbeddingResult(false, Date.now() - startedAt);
+      throw error;
+    }
+  }
+
+  private async createEmbedding(text: string): Promise<number[]> {
     if (this.mode() === 'mock') return this.mockEmbedding(text);
     const apiKey = this.config.get<string>('OPENAI_API_KEY');
     if (!apiKey) {
@@ -81,6 +95,7 @@ export class EmbeddingService implements OnModuleInit {
       }
 
       if (!retryable || attempt === 2) break;
+      this.metrics.recordEmbeddingRetry();
       await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
     }
 

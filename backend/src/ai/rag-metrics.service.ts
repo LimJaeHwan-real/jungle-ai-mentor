@@ -18,15 +18,30 @@ export interface RagMetricsSnapshot {
     skipped: number;
     failed: number;
   };
+  embedding: {
+    total: number;
+    succeeded: number;
+    failed: number;
+    retries: number;
+    totalDurationMs: number;
+    p95DurationMs: number | null;
+    recentDurationCount: number;
+    provider: string | null;
+    model: string | null;
+    mode: string | null;
+    dimension: number | null;
+  };
 }
 
 @Injectable()
 export class RagMetricsService {
   private static readonly durationWindow: number[] = [];
+  private static readonly embeddingDurationWindow: number[] = [];
   private static readonly durationWindowLimit = 200;
   private static snapshot: RagMetricsSnapshot = {
     searches: { total: 0, sufficientEvidence: 0, insufficientEvidence: 0, degraded: 0, noActiveIndex: 0, totalDurationMs: 0, p95DurationMs: null, recentDurationCount: 0 },
     indexing: { created: 0, updated: 0, skipped: 0, failed: 0 },
+    embedding: { total: 0, succeeded: 0, failed: 0, retries: 0, totalDurationMs: 0, p95DurationMs: null, recentDurationCount: 0, provider: null, model: null, mode: null, dimension: null },
   };
 
   recordSearch(status: RagRetrievalStatus, durationMs: number) {
@@ -46,6 +61,30 @@ export class RagMetricsService {
 
   recordIndex(status: 'created' | 'updated' | 'skipped' | 'failed') {
     RagMetricsService.snapshot.indexing[status] += 1;
+  }
+
+  recordEmbeddingRequest(metadata: { provider: string; model: string; mode: string; dimension: number }) {
+    const embedding = RagMetricsService.snapshot.embedding;
+    embedding.total += 1;
+    embedding.provider = metadata.provider;
+    embedding.model = metadata.model;
+    embedding.mode = metadata.mode;
+    embedding.dimension = metadata.dimension;
+  }
+
+  recordEmbeddingRetry() {
+    RagMetricsService.snapshot.embedding.retries += 1;
+  }
+
+  recordEmbeddingResult(succeeded: boolean, durationMs: number) {
+    const embedding = RagMetricsService.snapshot.embedding;
+    embedding[succeeded ? 'succeeded' : 'failed'] += 1;
+    embedding.totalDurationMs += durationMs;
+    RagMetricsService.embeddingDurationWindow.push(durationMs);
+    if (RagMetricsService.embeddingDurationWindow.length > RagMetricsService.durationWindowLimit) RagMetricsService.embeddingDurationWindow.shift();
+    const sorted = [...RagMetricsService.embeddingDurationWindow].sort((a, b) => a - b);
+    embedding.recentDurationCount = sorted.length;
+    embedding.p95DurationMs = sorted[Math.ceil(0.95 * sorted.length) - 1];
   }
 
   getSnapshot(): RagMetricsSnapshot {

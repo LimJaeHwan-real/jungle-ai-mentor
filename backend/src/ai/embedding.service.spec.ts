@@ -3,7 +3,8 @@ import { ServiceUnavailableException } from '@nestjs/common';
 import { EmbeddingService } from './embedding.service';
 
 function service(values: Record<string, string | undefined>) {
-  return new EmbeddingService({ get: jest.fn((key: string) => values[key]) } as unknown as ConfigService);
+  const metrics = { recordEmbeddingRequest: jest.fn(), recordEmbeddingRetry: jest.fn(), recordEmbeddingResult: jest.fn() };
+  return new EmbeddingService({ get: jest.fn((key: string) => values[key]) } as unknown as ConfigService, metrics as never);
 }
 
 describe('EmbeddingService 운영 정책', () => {
@@ -75,6 +76,27 @@ describe('EmbeddingService 운영 정책', () => {
 
     await expect(target.embed('정글 질문')).resolves.toEqual([0.1, 0.2]);
     expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it('성공·재시도와 실패를 질문 내용 없이 운영 지표에 기록한다', async () => {
+    const metrics = { recordEmbeddingRequest: jest.fn(), recordEmbeddingRetry: jest.fn(), recordEmbeddingResult: jest.fn() };
+    const values: Record<string, string> = { RAG_EMBEDDING_MODE: 'real', OPENAI_API_KEY: 'configured', RAG_EMBEDDING_DIMENSION: '2' };
+    const config = { get: (key: string) => values[key] };
+    const target = new EmbeddingService(config as never, metrics as never);
+    jest.spyOn(global, 'fetch')
+      .mockResolvedValueOnce({ ok: false, status: 429 } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ embedding: [0.1, 0.2] }] }) } as Response);
+
+    await expect(target.embed('민감한 질문 본문')).resolves.toEqual([0.1, 0.2]);
+    expect(metrics.recordEmbeddingRequest).toHaveBeenCalledWith(expect.objectContaining({ provider: 'openai', mode: 'real', dimension: 2 }));
+    expect(metrics.recordEmbeddingRetry).toHaveBeenCalledTimes(1);
+    expect(metrics.recordEmbeddingResult).toHaveBeenCalledWith(true, expect.any(Number));
+    expect(JSON.stringify(metrics.recordEmbeddingRequest.mock.calls)).not.toContain('민감한 질문 본문');
+
+    jest.restoreAllMocks();
+    const missingKey = new EmbeddingService({ get: () => undefined } as never, metrics as never);
+    await expect(missingKey.embed('또 다른 질문')).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(metrics.recordEmbeddingResult).toHaveBeenLastCalledWith(false, expect.any(Number));
   });
 
   it('일반 4xx 응답은 다시 요청하지 않는다', async () => {
