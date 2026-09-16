@@ -74,6 +74,33 @@ describe('RagReindexService', () => {
     expect(complete).toHaveBeenCalledWith(expect.any(Object), 'FAILED', 'EMBEDDING_UNAVAILABLE', '임베딩 서비스를 사용할 수 없어 기존 색인을 유지했습니다.');
   });
 
+  it('임대 연장 대상이 사라지면 재색인을 성공으로 기록하지 않는다', async () => {
+    const { service, dataSource, rag } = createService();
+    let tick: (() => void) | undefined;
+    let finishEmbedding: (() => void) | undefined;
+    const interval = jest.spyOn(global, 'setInterval').mockImplementation(((callback: () => void) => {
+      tick = callback;
+      return 1 as unknown as NodeJS.Timeout;
+    }) as typeof setInterval);
+    const clear = jest.spyOn(global, 'clearInterval').mockImplementation(() => undefined);
+    (rag.reindexDocument as jest.Mock).mockImplementationOnce(() => new Promise<void>((resolve) => { finishEmbedding = resolve; }));
+    (dataSource.query as jest.Mock).mockResolvedValueOnce([[], 0]);
+    const complete = jest.spyOn(service as any, 'completeItem').mockResolvedValue(undefined);
+
+    try {
+      const processing = (service as any).processItem({ id: 'item-1', jobId: 'job-1', documentId: 'document-1' });
+      tick?.();
+      finishEmbedding?.();
+      await processing;
+
+      expect(dataSource.query).toHaveBeenCalledWith(expect.stringContaining('RETURNING id'), ['item-1']);
+      expect(complete).toHaveBeenCalledWith(expect.any(Object), 'FAILED', 'LEASE_RENEWAL_FAILED', '재색인 작업의 임대를 연장하지 못했습니다.');
+    } finally {
+      interval.mockRestore();
+      clear.mockRestore();
+    }
+  });
+
   it('완료 집계는 성공·실패 수와 실패 포함 완료 상태를 함께 저장한다', async () => {
     const { service, manager } = createService();
     (manager.query as jest.Mock).mockResolvedValueOnce([{ successCount: 2, failureCount: 1, remainingCount: 0 }]);
