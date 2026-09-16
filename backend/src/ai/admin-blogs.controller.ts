@@ -1,10 +1,11 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminEmailGuard } from '../auth/admin-email.guard';
 import { BlogSearchService } from './blog-search.service';
 import { SyncBlogsDto } from './dto/sync-blogs.dto';
 
 @Controller('admin/blogs')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AdminEmailGuard)
 export class AdminBlogsController {
   constructor(private readonly blogSearch: BlogSearchService) {}
 

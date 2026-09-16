@@ -3,8 +3,10 @@ import { useMutation } from '@tanstack/react-query';
 import { Bot, ExternalLink, RefreshCw, Search, Send, UploadCloud } from 'lucide-react';
 import { api, getErrorMessage } from '../api';
 import { AiAnswer, Faq } from '../types';
+import { useAuth } from '../state/AuthContext';
 
 export function AskPage() {
+  const { user } = useAuth();
   const [question, setQuestion] = useState('');
   const [autoBlogSearch, setAutoBlogSearch] = useState(false);
   const [answer, setAnswer] = useState<AiAnswer | undefined>();
@@ -83,11 +85,15 @@ export function AskPage() {
               <small>직접 켜면 저장된 자료에 근거가 부족할 때만 외부 블로그를 검색하고 가져옵니다.</small>
             </span>
           </label>
-          <button className="secondary-button" type="button" disabled={syncBlogsMutation.isPending} onClick={() => syncBlogsMutation.mutate()}>
-            <RefreshCw size={17} /> {syncBlogsMutation.isPending ? '블로그 인덱싱 중' : '크래프톤 정글 블로그 미리 인덱싱'}
-          </button>
-          {syncBlogsMutation.error && <p className="error-text">{getErrorMessage(syncBlogsMutation.error)}</p>}
-          {syncMessage && <p className="success-text">{syncMessage}</p>}
+          {user?.isAdmin && (
+            <>
+              <button className="secondary-button" type="button" disabled={syncBlogsMutation.isPending} onClick={() => syncBlogsMutation.mutate()}>
+                <RefreshCw size={17} /> {syncBlogsMutation.isPending ? '블로그 인덱싱 중' : '크래프톤 정글 블로그 미리 인덱싱'}
+              </button>
+              {syncBlogsMutation.error && <p className="error-text">{getErrorMessage(syncBlogsMutation.error)}</p>}
+              {syncMessage && <p className="success-text">{syncMessage}</p>}
+            </>
+          )}
           {askMutation.error && <p className="error-text">{getErrorMessage(askMutation.error)}</p>}
           <button className="primary-button" type="submit" disabled={askMutation.isPending}>
             <Send size={17} /> {askMutation.isPending ? '근거 검색과 답변 생성 중' : '질문하기'}
