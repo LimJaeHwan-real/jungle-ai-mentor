@@ -82,6 +82,8 @@ POST /api/admin/blogs/sync
 
 응답에는 `agentRoute`, `usedTools`, `agentState`, `references`가 포함됩니다.
 
+정글 지식 답변의 `[1]` 같은 번호는 아래 참고 근거의 같은 번호와 연결됩니다. 근거에는 문서 제목·URL·chunk ID·섹션·원문 범위·색인 버전이 포함될 수 있습니다. 생성된 답변에 유효한 근거 번호가 하나도 없거나 존재하지 않는 번호가 있으면 답변 대신 재시도 안내를 표시합니다. 번호 검사는 출처 연결만 확인하며, 문장 내용의 사실 여부는 별도 평가가 필요합니다.
+
 ## 실행 방법
 Windows PowerShell에서 `npm.ps1` 실행 정책에 막히는 경우 `npm.cmd`를 사용합니다.
 

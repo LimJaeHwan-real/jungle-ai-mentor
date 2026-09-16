@@ -21,6 +21,7 @@ describe('RagService RRF 후보 결합', () => {
     expect(chunks.query.mock.calls[0][0]).toContain('d."embeddingProvider" = $4');
     expect(chunks.query.mock.calls[0][0]).toContain('d."embeddingProvider" IS NULL');
     expect(chunks.query.mock.calls[0][0]).toContain('d."embeddingVersion" = $7');
+    expect(chunks.query.mock.calls[0][0]).toContain('c."chunkingVersion" AS "chunkingVersion"');
   });
 
   it('벡터와 키워드 후보에 모두 있는 chunk를 우선한다', () => {

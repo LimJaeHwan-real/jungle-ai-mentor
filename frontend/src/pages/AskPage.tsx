@@ -124,8 +124,9 @@ export function AskPage() {
                           <span className="tag-pill">{reference.imported ? '새로 저장됨' : reference.reason ?? '이미 저장됨'}</span>
                         )}
                       </div>
-                      <strong>{reference.title ?? '참고 문서'}</strong>
+                      <strong>[{index + 1}] {reference.title ?? '참고 문서'}</strong>
                       {reference.sectionPath && <small>문서 위치: {reference.sectionPath}</small>}
+                      {reference.chunkId && <small>근거 chunk: {reference.chunkId}</small>}
                       {reference.sourceUrl && (
                         <a href={reference.sourceUrl} target="_blank" rel="noreferrer">
                           출처 열기 <ExternalLink size={14} />

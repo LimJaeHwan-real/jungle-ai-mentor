@@ -92,7 +92,7 @@ export class AgentService {
             repositories: githubAnalyses.map((analysis) => analysis.repositoryUrl),
             fallbackCount: githubAnalyses.filter((analysis) => analysis.fallback).length,
           };
-          references = [...githubAnalyses, ...references];
+          references = [...references, ...githubAnalyses];
         }
 
         answer = await this.llm.answer(
@@ -103,6 +103,10 @@ export class AgentService {
               content: result.chunkText,
               category: result.category,
               sourceUrl: result.sourceUrl,
+              chunkId: result.chunkId,
+              sectionPath: result.sectionPath,
+              sourceStart: result.sourceStart,
+              sourceEnd: result.sourceEnd,
             })),
             ...githubAnalyses.map((analysis) => ({
               title: `GitHub repository: ${analysis.owner}/${analysis.repo}`,
@@ -111,8 +115,15 @@ export class AgentService {
               sourceUrl: analysis.repositoryUrl,
             })),
           ],
-          '정글 학습 자료와 자동 수집된 블로그 문서 chunk를 근거로 답변하세요. 근거 안에 GitHub 저장소 분석 정보가 있으면 사용자가 URL을 직접 입력하지 않았더라도 해당 저장소의 목적, README 요약, 파일 힌트를 함께 설명하세요. 근거가 부족하면 부족하다고 말하세요.',
+          '제공된 근거에 있는 내용만 답변하고, 핵심 주장마다 해당 근거 번호 [1], [2]를 표시하세요. 근거 안에 GitHub 저장소 분석 정보가 있으면 해당 저장소의 목적, README 요약, 파일 힌트를 설명할 수 있습니다. 근거가 부족한 부분은 단정하지 마세요.',
         );
+        const citedNumbers = [...answer.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1]));
+        if (citedNumbers.length === 0 || citedNumbers.some((number) => number < 1 || number > references.length)) {
+          state.answerCitationStatus = 'MISSING_OR_INVALID';
+          answer = '근거 번호를 확인할 수 있는 답변을 만들지 못했습니다. 잠시 후 다시 질문해 주세요.';
+        } else {
+          state.answerCitationStatus = 'CITATION_IDS_VALID';
+        }
       }
     } else {
       usedTools.push('GENERAL_LLM_TOOL');

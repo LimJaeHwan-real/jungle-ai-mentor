@@ -70,6 +70,10 @@ export interface AiAnswer {
 }
 
 export interface AiReference {
+  chunkId?: string;
+  chunkingVersion?: string;
+  embeddingVersion?: string;
+  indexedAt?: string;
   type?: string;
   title?: string;
   sourceUrl?: string;

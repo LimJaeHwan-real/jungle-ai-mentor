@@ -20,6 +20,9 @@ export interface RagSearchResult {
   sectionPath?: string;
   sourceStart?: number;
   sourceEnd?: number;
+  chunkingVersion?: string;
+  embeddingVersion?: string;
+  indexedAt?: Date;
   score: number;
   rerankScore?: number;
 }
@@ -209,6 +212,9 @@ export class RagService {
           c."sectionPath" AS "sectionPath",
           c."sourceStart" AS "sourceStart",
           c."sourceEnd" AS "sourceEnd",
+          c."chunkingVersion" AS "chunkingVersion",
+          c."embeddingVersion" AS "embeddingVersion",
+          c."indexedAt" AS "indexedAt",
           1 - (c.embedding <=> $1::vector) AS score
         FROM document_chunks c
         INNER JOIN documents d ON d.id = c."documentId"
@@ -271,6 +277,9 @@ export class RagService {
           c."sectionPath" AS "sectionPath",
           c."sourceStart" AS "sourceStart",
           c."sourceEnd" AS "sourceEnd",
+          c."chunkingVersion" AS "chunkingVersion",
+          c."embeddingVersion" AS "embeddingVersion",
+          c."indexedAt" AS "indexedAt",
           ts_rank_cd(${chunkTextFtsExpression('c')}, query.value) AS score
         FROM document_chunks c
         INNER JOIN documents d ON d.id = c."documentId"
@@ -296,6 +305,9 @@ export class RagService {
           c."sectionPath" AS "sectionPath",
           c."sourceStart" AS "sourceStart",
           c."sourceEnd" AS "sourceEnd",
+          c."chunkingVersion" AS "chunkingVersion",
+          c."embeddingVersion" AS "embeddingVersion",
+          c."indexedAt" AS "indexedAt",
           ts_rank_cd(${documentTitleFtsExpression('d')}, query.value) AS score
         FROM document_chunks c
         INNER JOIN documents d ON d.id = c."documentId"
