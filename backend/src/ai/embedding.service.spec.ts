@@ -33,6 +33,33 @@ describe('EmbeddingService 운영 정책', () => {
     expect(() => target.onModuleInit()).toThrow('demo 또는 local');
   });
 
+  it('NODE_ENV가 production이면 local 표시로 mock 금지를 우회할 수 없다', () => {
+    const target = service({ NODE_ENV: 'production', RAG_RUNTIME_ENV: 'local', RAG_EMBEDDING_MODE: 'mock', OPENAI_API_KEY: 'configured' });
+    expect(() => target.onModuleInit()).toThrow('demo 또는 local');
+  });
+
+  it('알 수 없는 embedding 모드를 시작 단계에서 거부한다', () => {
+    const target = service({ RAG_RUNTIME_ENV: 'local', RAG_EMBEDDING_MODE: 'automatic', OPENAI_API_KEY: 'configured' });
+    expect(() => target.onModuleInit()).toThrow('RAG_EMBEDDING_MODE');
+  });
+
+  it('빈 모델 이름을 시작 단계에서 거부한다', () => {
+    const target = service({ RAG_RUNTIME_ENV: 'production', OPENAI_API_KEY: 'configured', OPENAI_EMBEDDING_MODEL: ' ' });
+    expect(() => target.onModuleInit()).toThrow('OPENAI_EMBEDDING_MODEL');
+  });
+
+  it('양의 정수가 아닌 차원 설정을 시작 단계에서 거부한다', () => {
+    for (const dimension of ['0', '-2', '1.5', 'invalid']) {
+      const target = service({ RAG_RUNTIME_ENV: 'local', RAG_EMBEDDING_MODE: 'mock', RAG_EMBEDDING_DIMENSION: dimension });
+      expect(() => target.onModuleInit()).toThrow('RAG_EMBEDDING_DIMENSION');
+    }
+  });
+
+  it('DB vector 크기와 다른 차원 설정을 시작 단계에서 거부한다', () => {
+    const target = service({ RAG_RUNTIME_ENV: 'production', OPENAI_API_KEY: 'configured', RAG_EMBEDDING_DIMENSION: '512' });
+    expect(() => target.onModuleInit()).toThrow('RAG_EMBEDDING_DIMENSION');
+  });
+
   it('429와 5xx 응답은 두 번까지 다시 요청한 뒤 실제 embedding을 반환한다', async () => {
     const request = jest.spyOn(global, 'fetch')
       .mockResolvedValueOnce({ ok: false, status: 429 } as Response)

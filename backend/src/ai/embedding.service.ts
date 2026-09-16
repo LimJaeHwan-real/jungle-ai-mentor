@@ -12,8 +12,13 @@ export class EmbeddingService implements OnModuleInit {
 
   onModuleInit() {
     const mode = this.mode();
+    if (mode !== 'real' && mode !== 'mock') throw new Error('RAG_EMBEDDING_MODE는 real 또는 mock이어야 합니다.');
+    if (this.dimension !== 1536) throw new Error('RAG_EMBEDDING_DIMENSION은 DB vector(1536)와 일치해야 합니다.');
     if (mode === 'mock' && !this.mockAllowed()) throw new Error('RAG_EMBEDDING_MODE=mock은 demo 또는 local 환경에서만 허용됩니다.');
-    if (this.runtime() === 'production' && !this.config.get<string>('OPENAI_API_KEY')) {
+    if (mode === 'real' && !(this.config.get<string>('OPENAI_EMBEDDING_MODEL') ?? 'text-embedding-3-small').trim()) {
+      throw new Error('OPENAI_EMBEDDING_MODEL은 비어 있을 수 없습니다.');
+    }
+    if (this.runtime() === 'production' && !this.config.get<string>('OPENAI_API_KEY')?.trim()) {
       throw new Error('production 환경에서는 OPENAI_API_KEY가 필요합니다. mock embedding 자동 전환은 허용되지 않습니다.');
     }
   }
@@ -83,7 +88,7 @@ export class EmbeddingService implements OnModuleInit {
   }
 
   getMetadata() { return { mode: this.mode(), model: this.mode() === 'mock' ? 'deterministic-demo' : this.config.get<string>('OPENAI_EMBEDDING_MODEL') ?? 'text-embedding-3-small', dimension: this.dimension, version: this.config.get<string>('RAG_EMBEDDING_VERSION') ?? 'v1' }; }
-  private runtime() { return this.config.get<string>('RAG_RUNTIME_ENV') ?? (this.config.get<string>('NODE_ENV') === 'production' ? 'production' : 'local'); }
+  private runtime() { return this.config.get<string>('NODE_ENV') === 'production' ? 'production' : this.config.get<string>('RAG_RUNTIME_ENV') ?? 'local'; }
   private mode() { return this.config.get<string>('RAG_EMBEDDING_MODE') ?? 'real'; }
   private mockAllowed() { return ['demo', 'local'].includes(this.runtime()); }
 
