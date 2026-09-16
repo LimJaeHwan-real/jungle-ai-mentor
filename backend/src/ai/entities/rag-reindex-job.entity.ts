@@ -22,22 +22,22 @@ export class RagReindexJob {
   @Column({ default: 0 })
   duplicateCount: number;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   embeddingModel?: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   embeddingMode?: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   embeddingVersion?: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'integer', nullable: true })
   embeddingDimension?: number | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   startedAt?: Date | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   finishedAt?: Date | null;
 
   @CreateDateColumn()
