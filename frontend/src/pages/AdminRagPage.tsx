@@ -13,6 +13,15 @@ interface RagMetrics {
     p95DurationMs: number | null;
     recentDurationCount: number;
   };
+  retrieval?: {
+    fusionRuns: number;
+    rerankRuns: number;
+    vectorCandidates: number;
+    lexicalCandidates: number;
+    selectedResults: number;
+    vectorFailures: number;
+    lexicalFailures: number;
+  };
   indexing: { created: number; updated: number; skipped: number; failed: number };
   embedding: {
     total: number;
@@ -97,6 +106,15 @@ export function AdminRagPage() {
               <article className="faq-card"><span>색인 생성 / 갱신</span><strong>{metrics.data.indexing.created} / {metrics.data.indexing.updated}건</strong></article>
               <article className="faq-card"><span>색인 실패 / 건너뜀</span><strong>{metrics.data.indexing.failed} / {metrics.data.indexing.skipped}건</strong></article>
             </div>
+            {metrics.data.retrieval && <>
+              <h3>검색 경로</h3>
+              <div className="faq-grid">
+                <article className="faq-card"><span>벡터 / 키워드 후보 누적</span><strong>{metrics.data.retrieval.vectorCandidates} / {metrics.data.retrieval.lexicalCandidates}건</strong></article>
+                <article className="faq-card"><span>결합 / 재정렬 실행</span><strong>{metrics.data.retrieval.fusionRuns} / {metrics.data.retrieval.rerankRuns}회</strong></article>
+                <article className="faq-card"><span>최종 선택 결과 누적</span><strong>{metrics.data.retrieval.selectedResults}건</strong></article>
+                <article className="faq-card"><span>벡터 / 키워드 조회 실패</span><strong>{metrics.data.retrieval.vectorFailures} / {metrics.data.retrieval.lexicalFailures}회</strong></article>
+              </div>
+            </>}
             <h3>임베딩 서비스</h3>
             <p className="muted-line">{metrics.data.embedding.provider ?? '제공자 미확인'} / {metrics.data.embedding.model ?? '모델 미확인'} / {metrics.data.embedding.mode ?? '모드 미확인'} / {metrics.data.embedding.dimension === null ? '차원 미확인' : `${metrics.data.embedding.dimension}차원`}</p>
             <div className="faq-grid">

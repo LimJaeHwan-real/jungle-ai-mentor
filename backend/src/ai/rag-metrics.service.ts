@@ -12,6 +12,15 @@ export interface RagMetricsSnapshot {
     p95DurationMs: number | null;
     recentDurationCount: number;
   };
+  retrieval: {
+    fusionRuns: number;
+    rerankRuns: number;
+    vectorCandidates: number;
+    lexicalCandidates: number;
+    selectedResults: number;
+    vectorFailures: number;
+    lexicalFailures: number;
+  };
   indexing: {
     created: number;
     updated: number;
@@ -40,6 +49,7 @@ export class RagMetricsService {
   private static readonly durationWindowLimit = 200;
   private static snapshot: RagMetricsSnapshot = {
     searches: { total: 0, sufficientEvidence: 0, insufficientEvidence: 0, degraded: 0, noActiveIndex: 0, totalDurationMs: 0, p95DurationMs: null, recentDurationCount: 0 },
+    retrieval: { fusionRuns: 0, rerankRuns: 0, vectorCandidates: 0, lexicalCandidates: 0, selectedResults: 0, vectorFailures: 0, lexicalFailures: 0 },
     indexing: { created: 0, updated: 0, skipped: 0, failed: 0 },
     embedding: { total: 0, succeeded: 0, failed: 0, retries: 0, totalDurationMs: 0, p95DurationMs: null, recentDurationCount: 0, provider: null, model: null, mode: null, dimension: null },
   };
@@ -61,6 +71,19 @@ export class RagMetricsService {
 
   recordIndex(status: 'created' | 'updated' | 'skipped' | 'failed') {
     RagMetricsService.snapshot.indexing[status] += 1;
+  }
+
+  recordRetrievalCandidates(vectorCandidates: number, lexicalCandidates: number, selectedResults: number) {
+    const retrieval = RagMetricsService.snapshot.retrieval;
+    retrieval.fusionRuns += 1;
+    retrieval.rerankRuns += 1;
+    retrieval.vectorCandidates += vectorCandidates;
+    retrieval.lexicalCandidates += lexicalCandidates;
+    retrieval.selectedResults += selectedResults;
+  }
+
+  recordRetrievalFailure(path: 'vector' | 'lexical') {
+    RagMetricsService.snapshot.retrieval[path === 'vector' ? 'vectorFailures' : 'lexicalFailures'] += 1;
   }
 
   recordEmbeddingRequest(metadata: { provider: string; model: string; mode: string; dimension: number }) {

@@ -249,9 +249,13 @@ export class RagService {
         LIMIT $2
         `,
         [vector, limit, metadata.model, metadata.mode, metadata.version, metadata.dimension, metadata.provider],
-      )) as RagSearchResult[];
+      ).catch((error) => {
+        this.metrics.recordRetrievalFailure('vector');
+        throw error;
+      })) as RagSearchResult[];
       const lexicalRows = await this.lexicalSearch(question, limit);
       const results = this.rerankResults(question, this.mergeSearchResults(rows, lexicalRows, limit));
+      this.metrics.recordRetrievalCandidates(rows.length, lexicalRows.length, results.length);
       const status = this.hasSufficientEvidence(results)
         ? 'SUFFICIENT_EVIDENCE'
         : results.length === 0 && !(await this.hasCompatibleActiveIndex(metadata))
@@ -355,7 +359,10 @@ export class RagService {
       LIMIT $2
       `,
       [question, limit, category ?? null, metadata.provider, metadata.model, metadata.mode, metadata.version, metadata.dimension],
-    )) as RagSearchResult[];
+    ).catch((error) => {
+      this.metrics.recordRetrievalFailure('lexical');
+      throw error;
+    })) as RagSearchResult[];
     return rows.sort((a, b) => b.score - a.score);
   }
 

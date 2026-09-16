@@ -34,11 +34,12 @@ describe('RagService RRF 후보 결합', () => {
     const chunks = { query: jest.fn()
       .mockResolvedValueOnce([result('vector-result', 0.8)])
       .mockResolvedValueOnce([]) };
+    const metrics = { recordSearch: jest.fn(), recordRetrievalCandidates: jest.fn(), recordRetrievalFailure: jest.fn() };
     const service = Object.create(RagService.prototype) as any;
     Object.assign(service, {
       chunks,
       embeddings: { embed: jest.fn(async () => [0.1, 0.2]), toSqlVector: jest.fn(() => '[0.1,0.2]'), getMetadata: jest.fn(() => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 })) },
-      metrics: { recordSearch: jest.fn() },
+      metrics,
     });
 
     await expect(service.searchWithStatus('정글', 4)).resolves.toMatchObject({ status: 'SUFFICIENT_EVIDENCE' });
@@ -48,6 +49,42 @@ describe('RagService RRF 후보 결합', () => {
     expect(sql).toContain('c."indexStatus" = \'ACTIVE\'');
     expect(sql).toContain('c."embeddingProvider" IS NULL');
     expect(sql).toContain('d."embeddingProvider" IS NULL');
+    expect(metrics.recordRetrievalCandidates).toHaveBeenCalledWith(1, 0, 1);
+  });
+
+  it('벡터 조회 실패를 경로별 오류로 기록한다', async () => {
+    const chunks = { query: jest.fn()
+      .mockRejectedValueOnce(new Error('vector unavailable'))
+      .mockResolvedValueOnce([]) };
+    const metrics = { recordSearch: jest.fn(), recordRetrievalCandidates: jest.fn(), recordRetrievalFailure: jest.fn() };
+    const service = Object.create(RagService.prototype) as any;
+    Object.assign(service, {
+      chunks,
+      embeddings: { embed: jest.fn(async () => [0.1, 0.2]), toSqlVector: jest.fn(() => '[0.1,0.2]'), getMetadata: jest.fn(() => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 })) },
+      metrics,
+    });
+
+    await expect(service.searchWithStatus('정글', 4)).resolves.toMatchObject({ status: 'SEARCH_DEGRADED' });
+    expect(metrics.recordRetrievalFailure).toHaveBeenCalledWith('vector');
+    expect(metrics.recordRetrievalCandidates).not.toHaveBeenCalled();
+  });
+
+  it('키워드 조회 실패도 재시도한 횟수만큼 기록한다', async () => {
+    const chunks = { query: jest.fn()
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('lexical unavailable'))
+      .mockRejectedValueOnce(new Error('lexical unavailable')) };
+    const metrics = { recordSearch: jest.fn(), recordRetrievalCandidates: jest.fn(), recordRetrievalFailure: jest.fn() };
+    const service = Object.create(RagService.prototype) as any;
+    Object.assign(service, {
+      chunks,
+      embeddings: { embed: jest.fn(async () => [0.1, 0.2]), toSqlVector: jest.fn(() => '[0.1,0.2]'), getMetadata: jest.fn(() => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 })) },
+      metrics,
+    });
+
+    await expect(service.searchWithStatus('정글', 4)).resolves.toMatchObject({ status: 'SEARCH_DEGRADED' });
+    expect(metrics.recordRetrievalFailure).toHaveBeenCalledTimes(2);
+    expect(metrics.recordRetrievalFailure).toHaveBeenCalledWith('lexical');
   });
 
   it('호환되는 활성 chunk가 없으면 문서 상태와 무관하게 색인 없음으로 분류한다', async () => {
@@ -60,7 +97,7 @@ describe('RagService RRF 후보 결합', () => {
       chunks,
       documents: { count: jest.fn(async () => 1) },
       embeddings: { embed: jest.fn(async () => [0.1, 0.2]), toSqlVector: jest.fn(() => '[0.1,0.2]'), getMetadata: jest.fn(() => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 })) },
-      metrics: { recordSearch: jest.fn() },
+      metrics: { recordSearch: jest.fn(), recordRetrievalCandidates: jest.fn(), recordRetrievalFailure: jest.fn() },
     });
 
     await expect(service.searchWithStatus('정글', 4)).resolves.toMatchObject({ status: 'NO_ACTIVE_INDEX' });
