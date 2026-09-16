@@ -86,6 +86,8 @@ POST /api/admin/blogs/sync
 
 `/admin/*` API는 로그인과 운영자 이메일 허용 목록을 모두 검사합니다. 서버 환경 변수 `ADMIN_EMAIL_ALLOWLIST`에 운영자 계정 이메일을 쉼표로 구분해 설정합니다. 비어 있으면 모든 관리자 API 접근을 거부합니다. 이메일 목록은 응답이나 로그에 포함하지 않으며, 질문 화면의 수동 블로그 색인 버튼은 운영자에게만 표시됩니다.
 
+운영자는 `RAG 운영` 화면에서 현재 프로세스의 검색·색인 지표와 재색인 대상을 조회할 수 있습니다. 상태 해석과 대응 절차는 [RAG 운영 점검 절차](docs/rag-operations-runbook.md)를 참고합니다.
+
 ## 실행 방법
 Windows PowerShell에서 `npm.ps1` 실행 정책에 막히는 경우 `npm.cmd`를 사용합니다.
 
