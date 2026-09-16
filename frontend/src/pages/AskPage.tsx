@@ -6,7 +6,7 @@ import { AiAnswer, Faq } from '../types';
 
 export function AskPage() {
   const [question, setQuestion] = useState('');
-  const [autoBlogSearch, setAutoBlogSearch] = useState(true);
+  const [autoBlogSearch, setAutoBlogSearch] = useState(false);
   const [answer, setAnswer] = useState<AiAnswer | undefined>();
   const [publishMessage, setPublishMessage] = useState('');
   const [syncMessage, setSyncMessage] = useState('');
@@ -80,7 +80,7 @@ export function AskPage() {
             <input type="checkbox" checked={autoBlogSearch} onChange={(event) => setAutoBlogSearch(event.target.checked)} />
             <span>
               <strong>근거 부족 시 블로그 검색 보강</strong>
-              <small>기본은 저장된 pgvector를 빠르게 검색하고, 근거가 없을 때만 실시간 검색을 보강합니다.</small>
+              <small>직접 켜면 저장된 자료에 근거가 부족할 때만 외부 블로그를 검색하고 가져옵니다.</small>
             </span>
           </label>
           <button className="secondary-button" type="button" disabled={syncBlogsMutation.isPending} onClick={() => syncBlogsMutation.mutate()}>
@@ -145,7 +145,9 @@ export function AskPage() {
                     ? '근거 검색 서비스에 문제가 있어 참고 근거를 표시하지 않았습니다. 잠시 후 다시 시도해 주세요.'
                     : answer.retrievalStatus === 'NO_ACTIVE_INDEX'
                       ? '현재 활성 지식 색인이 없어 참고 근거를 표시하지 않았습니다. 문서 색인 후 다시 시도해 주세요.'
-                    : '아직 표시할 참고 근거가 없습니다. 블로그 자동 검색을 켜고 다시 질문해보세요.'}
+                    : answer.retrievalStatus === 'INSUFFICIENT_EVIDENCE'
+                      ? '답변에 사용할 만큼 충분한 근거를 찾지 못했습니다. 질문을 구체적으로 바꾸거나 블로그 검색 보강을 직접 켜고 다시 질문해보세요.'
+                      : '아직 표시할 참고 근거가 없습니다.'}
                 </p>
               )}
             </section>

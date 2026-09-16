@@ -49,26 +49,12 @@ export class AgentService {
       usedTools.push('RAG_SEARCH_TOOL');
       let retrieval = await this.rag.searchWithStatus(dto.question);
       let results = retrieval.results;
-      references = results;
       state.ragFirst = {
         resultCount: results.length,
         topScore: results[0]?.score,
         status: retrieval.status,
       };
-      state.retrievalStatus = retrieval.status;
-
-      if (retrieval.status === 'SEARCH_DEGRADED' || retrieval.status === 'NO_ACTIVE_INDEX') {
-        references = [];
-        state.ragUnavailable = {
-          resultCount: results.length,
-          status: retrieval.status,
-          action: retrieval.status === 'SEARCH_DEGRADED' ? 'answer_generation_skipped' : 'reindex_required',
-        };
-        answer = retrieval.status === 'SEARCH_DEGRADED'
-          ? '현재 근거 검색 서비스에 일시적인 문제가 있어 신뢰할 수 있는 답변을 만들지 않았습니다. 잠시 후 다시 시도해 주세요.'
-          : '현재 질문에 사용할 활성 지식 색인이 없습니다. 운영자가 문서를 색인하거나 재색인한 뒤 다시 시도해 주세요.';
-      } else {
-        if (dto.autoBlogSearch !== false && retrieval.status === 'INSUFFICIENT_EVIDENCE') {
+      if (dto.autoBlogSearch === true && retrieval.status === 'INSUFFICIENT_EVIDENCE') {
         usedTools.push('BLOG_SEARCH_TOOL');
         const blogSearch = await this.blogSearch.discoverAndImport(dto.question);
         state.blogSearch = {
@@ -80,10 +66,24 @@ export class AgentService {
         };
         retrieval = await this.rag.searchWithStatus(dto.question, 6);
         results = retrieval.results;
-        state.retrievalStatus = retrieval.status;
-        references = [...blogSearch.references, ...results];
-        }
+      }
 
+      state.retrievalStatus = retrieval.status;
+      if (retrieval.status === 'SEARCH_DEGRADED' || retrieval.status === 'NO_ACTIVE_INDEX') {
+        references = [];
+        state.ragUnavailable = {
+          resultCount: results.length,
+          status: retrieval.status,
+          action: retrieval.status === 'SEARCH_DEGRADED' ? 'answer_generation_skipped' : 'reindex_required',
+        };
+        answer = retrieval.status === 'SEARCH_DEGRADED'
+          ? '현재 근거 검색 서비스에 일시적인 문제가 있어 신뢰할 수 있는 답변을 만들지 않았습니다. 잠시 후 다시 시도해 주세요.'
+          : '현재 질문에 사용할 활성 지식 색인이 없습니다. 운영자가 문서를 색인하거나 재색인한 뒤 다시 시도해 주세요.';
+      } else if (retrieval.status === 'INSUFFICIENT_EVIDENCE') {
+        references = [];
+        answer = '등록된 근거에서 질문에 답할 만큼 충분한 내용을 확인하지 못했습니다. 질문을 더 구체적으로 하거나 자료가 추가된 뒤 다시 시도해 주세요.';
+      } else {
+        references = results;
         const githubAnalyses = await this.analyzeGithubUrlsFromRagResults(results);
         if (githubAnalyses.length > 0) {
           usedTools.push('GITHUB_MCP_TOOL');
