@@ -115,6 +115,25 @@ describe('RagService 안전한 강제 재색인', () => {
     expect(manager.create).toHaveBeenCalledWith(DocumentChunk, expect.objectContaining({ documentTitle: dto.title, sourceUrl: dto.sourceUrl, chunkingVersion: 'markdown-cl100k-256-v2' }));
   });
 
+  it('source URL이 없는 관리자 문서도 원래 ID의 chunk를 교체한다', async () => {
+    const existing = { id: 'document-1', ...dto, sourceUrl: undefined, contentHash: 'old-hash', indexStatus: 'ACTIVE' };
+    const manager = {
+      save: jest.fn(async (_entity: unknown, value: unknown) => value),
+      create: jest.fn((_entity: unknown, value: unknown) => value),
+      delete: jest.fn(async () => undefined),
+    };
+    const service = Object.create(RagService.prototype) as any;
+    Object.assign(service, {
+      documents: { findOne: jest.fn(async () => existing), create: jest.fn(() => ({ id: 'new-document' })) },
+      embeddings: { embed: jest.fn(async () => [0.1, 0.2]), getMetadata: jest.fn(() => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 2 })) },
+      dataSource: { transaction: jest.fn(async (work: (transactionManager: typeof manager) => Promise<unknown>) => work(manager)) },
+      metrics: { recordIndex: jest.fn() },
+    });
+
+    await expect(service.reindexDocument(existing.id)).resolves.toMatchObject({ id: existing.id, status: 'updated' });
+    expect(manager.delete).toHaveBeenCalledWith(DocumentChunk, { documentId: existing.id });
+  });
+
   it('내용이 같아도 embedding 버전이 다르면 새 색인을 만든다', async () => {
     const existing = { id: 'document-1', ...dto, contentHash: createHash('sha256').update(dto.content).digest('hex'), indexStatus: 'ACTIVE', embeddingVersion: 'v1' };
     const manager = {

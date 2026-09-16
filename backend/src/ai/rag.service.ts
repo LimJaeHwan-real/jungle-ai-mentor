@@ -69,9 +69,12 @@ export class RagService {
     return this.indexDocument(dto);
   }
 
-  async indexDocument(dto: CreateDocumentDto, options: { force?: boolean } = {}): Promise<RagIndexResult> {
+  async indexDocument(dto: CreateDocumentDto, options: { force?: boolean; documentId?: string } = {}): Promise<RagIndexResult> {
     const contentHash = createHash('sha256').update(dto.content).digest('hex');
-    const existing = dto.sourceUrl ? await this.documents.findOne({ where: { sourceUrl: dto.sourceUrl } }) : undefined;
+    const existing = options.documentId
+      ? await this.documents.findOne({ where: { id: options.documentId } })
+      : dto.sourceUrl ? await this.documents.findOne({ where: { sourceUrl: dto.sourceUrl } }) : undefined;
+    if (options.documentId && !existing) throw new NotFoundException('재색인 대상 문서를 찾을 수 없습니다.');
     const metadata = this.embeddings.getMetadata();
 
     if (existing?.contentHash === contentHash && existing.indexStatus === 'ACTIVE'
@@ -178,7 +181,7 @@ export class RagService {
         sourceType: document.sourceType,
         sourceUrl: document.sourceUrl,
       },
-      { force: true },
+      { force: true, documentId: document.id },
     );
   }
 
