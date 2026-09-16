@@ -22,6 +22,50 @@ describe('RagService RRF 후보 결합', () => {
     expect(chunks.query.mock.calls[0][0]).toContain('d."embeddingProvider" IS NULL');
     expect(chunks.query.mock.calls[0][0]).toContain('d."embeddingVersion" = $7');
     expect(chunks.query.mock.calls[0][0]).toContain('c."chunkingVersion" AS "chunkingVersion"');
+    expect(chunks.query.mock.calls[0][0]).toContain('c."embeddingModel" = $5');
+    expect(chunks.query.mock.calls[0][0]).toContain('c."indexStatus" = \'ACTIVE\'');
+    expect(chunks.query.mock.calls[0][0]).toContain('c."embeddingProvider" IS NULL');
+    const sql = chunks.query.mock.calls[0][0] as string;
+    expect(sql.match(/c\."embeddingModel" = \$5/g)).toHaveLength(2);
+    expect(sql.match(/c\.embedding IS NOT NULL/g)).toHaveLength(2);
+  });
+
+  it('벡터 후보에서도 chunk 메타데이터 호환성과 레거시 실색인 예외를 검사한다', async () => {
+    const chunks = { query: jest.fn()
+      .mockResolvedValueOnce([result('vector-result', 0.8)])
+      .mockResolvedValueOnce([]) };
+    const service = Object.create(RagService.prototype) as any;
+    Object.assign(service, {
+      chunks,
+      embeddings: { embed: jest.fn(async () => [0.1, 0.2]), toSqlVector: jest.fn(() => '[0.1,0.2]'), getMetadata: jest.fn(() => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 })) },
+      metrics: { recordSearch: jest.fn() },
+    });
+
+    await expect(service.searchWithStatus('정글', 4)).resolves.toMatchObject({ status: 'SUFFICIENT_EVIDENCE' });
+    const sql = chunks.query.mock.calls[0][0] as string;
+    expect(sql).toContain('c."embeddingModel" = $3');
+    expect(sql).toContain('c."embeddingDimension" = $6');
+    expect(sql).toContain('c."indexStatus" = \'ACTIVE\'');
+    expect(sql).toContain('c."embeddingProvider" IS NULL');
+    expect(sql).toContain('d."embeddingProvider" IS NULL');
+  });
+
+  it('호환되는 활성 chunk가 없으면 문서 상태와 무관하게 색인 없음으로 분류한다', async () => {
+    const chunks = { query: jest.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ exists: false }]) };
+    const service = Object.create(RagService.prototype) as any;
+    Object.assign(service, {
+      chunks,
+      documents: { count: jest.fn(async () => 1) },
+      embeddings: { embed: jest.fn(async () => [0.1, 0.2]), toSqlVector: jest.fn(() => '[0.1,0.2]'), getMetadata: jest.fn(() => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 })) },
+      metrics: { recordSearch: jest.fn() },
+    });
+
+    await expect(service.searchWithStatus('정글', 4)).resolves.toMatchObject({ status: 'NO_ACTIVE_INDEX' });
+    expect(chunks.query.mock.calls[2][0]).toContain('c."embeddingModel" = $2');
+    expect(service.documents.count).not.toHaveBeenCalled();
   });
 
   it('벡터와 키워드 후보에 모두 있는 chunk를 우선한다', () => {

@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
-import { Brackets, DataSource, IsNull, Repository } from 'typeorm';
+import { Brackets, DataSource, Repository } from 'typeorm';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { DocumentChunk } from './entities/document-chunk.entity';
 import { KnowledgeDocument } from './entities/knowledge-document.entity';
@@ -54,6 +54,25 @@ export interface RagReindexTarget {
   embeddingDimension?: number;
   chunkingVersion?: string;
   updatedAt: Date;
+}
+
+function chunkCompatibilityPredicate(provider: number, model: number, mode: number, version: number, dimension: number): string {
+  return `(
+    (c."indexStatus" = 'ACTIVE'
+      AND c."embeddingProvider" = $${provider}
+      AND c."embeddingModel" = $${model}
+      AND c."embeddingMode" = $${mode}
+      AND c."embeddingVersion" = $${version}
+      AND c."embeddingDimension" = $${dimension})
+    OR ($${provider} = 'openai' AND $${mode} = 'real'
+      AND d."embeddingProvider" IS NULL
+      AND c."indexStatus" IS NULL
+      AND c."embeddingProvider" IS NULL
+      AND c."embeddingModel" IS NULL
+      AND c."embeddingMode" IS NULL
+      AND c."embeddingVersion" IS NULL
+      AND c."embeddingDimension" IS NULL)
+  )`;
 }
 
 @Injectable()
@@ -225,6 +244,7 @@ export class RagService {
           AND d."embeddingVersion" = $5
           AND d."embeddingDimension" = $6
           AND (d."embeddingProvider" = $7 OR ($7 = 'openai' AND $4 = 'real' AND d."embeddingProvider" IS NULL))
+          AND ${chunkCompatibilityPredicate(7, 3, 4, 5, 6)}
         ORDER BY c.embedding <=> $1::vector
         LIMIT $2
         `,
@@ -284,12 +304,14 @@ export class RagService {
         FROM document_chunks c
         INNER JOIN documents d ON d.id = c."documentId"
         CROSS JOIN query
-        WHERE d."indexStatus" = 'ACTIVE'
+        WHERE c.embedding IS NOT NULL
+          AND d."indexStatus" = 'ACTIVE'
           AND (d."embeddingProvider" = $4 OR ($4 = 'openai' AND $6 = 'real' AND d."embeddingProvider" IS NULL))
           AND d."embeddingModel" = $5
           AND d."embeddingMode" = $6
           AND d."embeddingVersion" = $7
           AND d."embeddingDimension" = $8
+          AND ${chunkCompatibilityPredicate(4, 5, 6, 7, 8)}
           AND ${chunkTextFtsExpression('c')} @@ query.value
           AND ($3::text IS NULL OR d.category = $3)
 
@@ -312,12 +334,14 @@ export class RagService {
         FROM document_chunks c
         INNER JOIN documents d ON d.id = c."documentId"
         CROSS JOIN query
-        WHERE d."indexStatus" = 'ACTIVE'
+        WHERE c.embedding IS NOT NULL
+          AND d."indexStatus" = 'ACTIVE'
           AND (d."embeddingProvider" = $4 OR ($4 = 'openai' AND $6 = 'real' AND d."embeddingProvider" IS NULL))
           AND d."embeddingModel" = $5
           AND d."embeddingMode" = $6
           AND d."embeddingVersion" = $7
           AND d."embeddingDimension" = $8
+          AND ${chunkCompatibilityPredicate(4, 5, 6, 7, 8)}
           AND ${documentTitleFtsExpression('d')} @@ query.value
           AND ($3::text IS NULL OR d.category = $3)
       )
@@ -386,23 +410,22 @@ export class RagService {
   }
 
   private async hasCompatibleActiveIndex(metadata: ReturnType<EmbeddingService['getMetadata']>) {
-    return (await this.documents.count({
-      where: [{
-        indexStatus: 'ACTIVE',
-        embeddingProvider: metadata.provider,
-        embeddingModel: metadata.model,
-        embeddingMode: metadata.mode,
-        embeddingVersion: metadata.version,
-        embeddingDimension: metadata.dimension,
-      }, ...(metadata.provider === 'openai' && metadata.mode === 'real' ? [{
-        indexStatus: 'ACTIVE',
-        embeddingProvider: IsNull(),
-        embeddingModel: metadata.model,
-        embeddingMode: metadata.mode,
-        embeddingVersion: metadata.version,
-        embeddingDimension: metadata.dimension,
-      }] : [])],
-    })) > 0;
+    const rows = await this.chunks.query(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM document_chunks c
+        INNER JOIN documents d ON d.id = c."documentId"
+        WHERE c.embedding IS NOT NULL
+          AND d."indexStatus" = 'ACTIVE'
+          AND d."embeddingModel" = $2
+          AND d."embeddingMode" = $3
+          AND d."embeddingVersion" = $4
+          AND d."embeddingDimension" = $5
+          AND (d."embeddingProvider" = $1 OR ($1 = 'openai' AND $3 = 'real' AND d."embeddingProvider" IS NULL))
+          AND ${chunkCompatibilityPredicate(1, 2, 3, 4, 5)}
+      ) AS "exists"
+    `, [metadata.provider, metadata.model, metadata.mode, metadata.version, metadata.dimension]);
+    return rows[0]?.exists === true;
   }
 
   private queryTerms(question: string) {
