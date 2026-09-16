@@ -87,7 +87,7 @@ export class EmbeddingService implements OnModuleInit {
     throw new ServiceUnavailableException('임베딩 서비스를 사용할 수 없습니다. mock으로 자동 전환하지 않습니다.');
   }
 
-  getMetadata() { return { mode: this.mode(), model: this.mode() === 'mock' ? 'deterministic-demo' : this.config.get<string>('OPENAI_EMBEDDING_MODEL') ?? 'text-embedding-3-small', dimension: this.dimension, version: this.config.get<string>('RAG_EMBEDDING_VERSION') ?? 'v1' }; }
+  getMetadata() { return { provider: this.mode() === 'mock' ? 'local' : 'openai', mode: this.mode(), model: this.mode() === 'mock' ? 'deterministic-demo' : this.config.get<string>('OPENAI_EMBEDDING_MODEL') ?? 'text-embedding-3-small', dimension: this.dimension, version: this.config.get<string>('RAG_EMBEDDING_VERSION') ?? 'v1' }; }
   private runtime() { return this.config.get<string>('NODE_ENV') === 'production' ? 'production' : this.config.get<string>('RAG_RUNTIME_ENV') ?? 'local'; }
   private mode() { return this.config.get<string>('RAG_EMBEDDING_MODE') ?? 'real'; }
   private mockAllowed() { return ['demo', 'local'].includes(this.runtime()); }

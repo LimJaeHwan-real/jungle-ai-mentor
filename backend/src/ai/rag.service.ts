@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
-import { Brackets, DataSource, Repository } from 'typeorm';
+import { Brackets, DataSource, IsNull, Repository } from 'typeorm';
 import { CreateDocumentDto } from './dto/create-document.dto';
 import { DocumentChunk } from './entities/document-chunk.entity';
 import { KnowledgeDocument } from './entities/knowledge-document.entity';
@@ -71,8 +71,12 @@ export class RagService {
   async indexDocument(dto: CreateDocumentDto, options: { force?: boolean } = {}): Promise<RagIndexResult> {
     const contentHash = createHash('sha256').update(dto.content).digest('hex');
     const existing = dto.sourceUrl ? await this.documents.findOne({ where: { sourceUrl: dto.sourceUrl } }) : undefined;
+    const metadata = this.embeddings.getMetadata();
 
-    if (existing?.contentHash === contentHash && !options.force) {
+    if (existing?.contentHash === contentHash && existing.indexStatus === 'ACTIVE'
+      && existing.embeddingProvider === metadata.provider && existing.embeddingModel === metadata.model
+      && existing.embeddingMode === metadata.mode && existing.embeddingVersion === metadata.version
+      && existing.embeddingDimension === metadata.dimension && !options.force) {
       const chunkCount = await this.chunks.count({ where: { documentId: existing.id } });
       const result: RagIndexResult = {
         id: existing.id,
@@ -88,16 +92,23 @@ export class RagService {
 
     const texts = this.splitText(dto.content);
     if (!texts.length) throw new BadRequestException('색인할 수 있는 문서 내용이 없습니다.');
-    let vectors: number[][];
+    let vectors: Array<{ embedding: number[]; generatedAt: Date }>;
     try {
-      vectors = await Promise.all(texts.map((chunk) => this.embeddings.embed(chunk.chunkText)));
+      vectors = await Promise.all(texts.map(async (chunk) => ({
+        embedding: await this.embeddings.embed(chunk.chunkText),
+        generatedAt: new Date(),
+      })));
     } catch (error) {
-      if (!existing) await this.documents.save(this.documents.create({ title: dto.title, content: dto.content, category: dto.category ?? 'GENERAL', sourceType: dto.sourceType ?? 'ADMIN', sourceUrl: dto.sourceUrl, contentHash, indexStatus: 'FAILED' }));
+      if (existing) {
+        await this.documents.update(existing.id, { indexErrorCode: 'EMBEDDING_UNAVAILABLE' });
+      } else {
+        await this.documents.save(this.documents.create({ title: dto.title, content: dto.content, category: dto.category ?? 'GENERAL', sourceType: dto.sourceType ?? 'ADMIN', sourceUrl: dto.sourceUrl, contentHash, indexStatus: 'FAILED', indexErrorCode: 'EMBEDDING_UNAVAILABLE' }));
+      }
       this.metrics.recordIndex('failed');
       throw error;
     }
-    const metadata = this.embeddings.getMetadata();
     const document = existing ?? this.documents.create();
+    const indexedAt = new Date();
     Object.assign(document, {
         title: dto.title,
         content: dto.content,
@@ -105,7 +116,10 @@ export class RagService {
         sourceType: dto.sourceType ?? 'ADMIN',
         sourceUrl: dto.sourceUrl,
         contentHash,
-        indexStatus: 'ACTIVE', embeddingModel: metadata.model, embeddingMode: metadata.mode, embeddingVersion: metadata.version, embeddingDimension: metadata.dimension,
+        indexStatus: 'ACTIVE', indexErrorCode: null, indexedAt,
+        embeddingProvider: metadata.provider, embeddingModel: metadata.model, embeddingMode: metadata.mode,
+        embeddingVersion: metadata.version, embeddingDimension: metadata.dimension,
+        embeddingGeneratedAt: new Date(Math.max(...vectors.map((vector) => vector.generatedAt.getTime()))),
     });
     const savedDocument = await this.dataSource.transaction(async (manager) => {
       const saved = await manager.save(KnowledgeDocument, document);
@@ -119,7 +133,16 @@ export class RagService {
           sourceStart: chunk.sourceStart,
           sourceEnd: chunk.sourceEnd,
           tokenCount: Math.ceil(chunk.chunkText.length / 4),
-          embedding: vectors[index],
+          embedding: vectors[index].embedding,
+          embeddingProvider: metadata.provider,
+          embeddingModel: metadata.model,
+          embeddingDimension: metadata.dimension,
+          embeddingMode: metadata.mode,
+          embeddingVersion: metadata.version,
+          embeddingGeneratedAt: vectors[index].generatedAt,
+          indexedAt,
+          indexStatus: 'ACTIVE',
+          indexErrorCode: null,
         }),
       );
       await manager.save(DocumentChunk, chunks);
@@ -184,10 +207,11 @@ export class RagService {
           AND d."embeddingMode" = $4
           AND d."embeddingVersion" = $5
           AND d."embeddingDimension" = $6
+          AND (d."embeddingProvider" = $7 OR ($7 = 'openai' AND $4 = 'real' AND d."embeddingProvider" IS NULL))
         ORDER BY c.embedding <=> $1::vector
         LIMIT $2
         `,
-        [vector, limit, metadata.model, metadata.mode, metadata.version, metadata.dimension],
+        [vector, limit, metadata.model, metadata.mode, metadata.version, metadata.dimension, metadata.provider],
       )) as RagSearchResult[];
       const lexicalRows = await this.lexicalSearch(question, limit);
       const results = this.rerankResults(question, this.mergeSearchResults(rows, lexicalRows, limit));
@@ -220,6 +244,7 @@ export class RagService {
   }
 
   private async lexicalSearch(question: string, limit: number, category?: string): Promise<RagSearchResult[]> {
+    const metadata = this.embeddings.getMetadata();
     const rows = (await this.chunks.query(
       `
       WITH query AS (
@@ -240,6 +265,11 @@ export class RagService {
         INNER JOIN documents d ON d.id = c."documentId"
         CROSS JOIN query
         WHERE d."indexStatus" = 'ACTIVE'
+          AND (d."embeddingProvider" = $4 OR ($4 = 'openai' AND $6 = 'real' AND d."embeddingProvider" IS NULL))
+          AND d."embeddingModel" = $5
+          AND d."embeddingMode" = $6
+          AND d."embeddingVersion" = $7
+          AND d."embeddingDimension" = $8
           AND ${chunkTextFtsExpression('c')} @@ query.value
           AND ($3::text IS NULL OR d.category = $3)
 
@@ -260,6 +290,11 @@ export class RagService {
         INNER JOIN documents d ON d.id = c."documentId"
         CROSS JOIN query
         WHERE d."indexStatus" = 'ACTIVE'
+          AND (d."embeddingProvider" = $4 OR ($4 = 'openai' AND $6 = 'real' AND d."embeddingProvider" IS NULL))
+          AND d."embeddingModel" = $5
+          AND d."embeddingMode" = $6
+          AND d."embeddingVersion" = $7
+          AND d."embeddingDimension" = $8
           AND ${documentTitleFtsExpression('d')} @@ query.value
           AND ($3::text IS NULL OR d.category = $3)
       )
@@ -272,7 +307,7 @@ export class RagService {
       ORDER BY score DESC
       LIMIT $2
       `,
-      [question, limit, category ?? null],
+      [question, limit, category ?? null, metadata.provider, metadata.model, metadata.mode, metadata.version, metadata.dimension],
     )) as RagSearchResult[];
     return rows.sort((a, b) => b.score - a.score);
   }
@@ -329,13 +364,21 @@ export class RagService {
 
   private async hasCompatibleActiveIndex(metadata: ReturnType<EmbeddingService['getMetadata']>) {
     return (await this.documents.count({
-      where: {
+      where: [{
         indexStatus: 'ACTIVE',
+        embeddingProvider: metadata.provider,
         embeddingModel: metadata.model,
         embeddingMode: metadata.mode,
         embeddingVersion: metadata.version,
         embeddingDimension: metadata.dimension,
-      },
+      }, ...(metadata.provider === 'openai' && metadata.mode === 'real' ? [{
+        indexStatus: 'ACTIVE',
+        embeddingProvider: IsNull(),
+        embeddingModel: metadata.model,
+        embeddingMode: metadata.mode,
+        embeddingVersion: metadata.version,
+        embeddingDimension: metadata.dimension,
+      }] : [])],
     })) > 0;
   }
 
@@ -381,11 +424,13 @@ export class RagService {
         new Brackets((query) => {
           query
             .where('document."indexStatus" != :active', { active: 'ACTIVE' })
+            .orWhere('document."embeddingProvider" IS NULL')
             .orWhere('document."embeddingModel" IS NULL')
             .orWhere('document."embeddingMode" IS NULL')
             .orWhere('document."embeddingVersion" IS NULL')
             .orWhere('document."embeddingDimension" IS NULL')
             .orWhere('document."embeddingModel" != :model', { model: expectedEmbedding.model })
+            .orWhere('document."embeddingProvider" != :provider', { provider: expectedEmbedding.provider })
             .orWhere('document."embeddingMode" != :mode', { mode: expectedEmbedding.mode })
             .orWhere('document."embeddingVersion" != :version', { version: expectedEmbedding.version })
             .orWhere('document."embeddingDimension" != :dimension', { dimension: expectedEmbedding.dimension });

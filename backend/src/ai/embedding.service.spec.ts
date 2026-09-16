@@ -21,6 +21,12 @@ describe('EmbeddingService 운영 정책', () => {
     const target = service({ RAG_RUNTIME_ENV: 'demo', RAG_EMBEDDING_MODE: 'mock' });
     target.onModuleInit();
     await expect(target.embed('정글 알고리즘')).resolves.toHaveLength(1536);
+    expect(target.getMetadata()).toMatchObject({ provider: 'local', model: 'deterministic-demo', mode: 'mock', dimension: 1536 });
+  });
+
+  it('현재 실제 embedding 제공자와 모델을 메타데이터로 반환한다', () => {
+    const target = service({ RAG_EMBEDDING_MODE: 'real' });
+    expect(target.getMetadata()).toMatchObject({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', dimension: 1536 });
   });
 
   it('local real 모드에서 키가 없으면 mock으로 자동 전환하지 않는다', async () => {

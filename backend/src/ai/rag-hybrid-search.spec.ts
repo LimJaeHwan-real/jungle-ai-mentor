@@ -10,13 +10,17 @@ describe('RagService RRF 후보 결합', () => {
       lexicalSearch: (question: string, limit: number, category?: string) => Promise<RagSearchResult[]>;
     };
     service.chunks = chunks;
+    (service as any).embeddings = { getMetadata: () => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 }) };
 
     await expect(service.lexicalSearch('지원 일정', 4)).resolves.toEqual([result('fts-result', 0.8)]);
-    expect(chunks.query).toHaveBeenCalledWith(expect.stringContaining("websearch_to_tsquery('simple', $1)"), ['지원 일정', 4, null]);
+    expect(chunks.query).toHaveBeenCalledWith(expect.stringContaining("websearch_to_tsquery('simple', $1)"), ['지원 일정', 4, null, 'openai', 'text-embedding-3-small', 'real', 'v1', 1536]);
     expect(chunks.query.mock.calls[0][0]).not.toContain('.take(150)');
     expect(chunks.query.mock.calls[0][0]).not.toContain('CREATE INDEX');
     expect(chunks.query.mock.calls[0][0]).toContain(`to_tsvector('simple', coalesce(c."chunkText", ''))`);
     expect(chunks.query.mock.calls[0][0]).toContain(`to_tsvector('simple', coalesce(d.title, ''))`);
+    expect(chunks.query.mock.calls[0][0]).toContain('d."embeddingProvider" = $4');
+    expect(chunks.query.mock.calls[0][0]).toContain('d."embeddingProvider" IS NULL');
+    expect(chunks.query.mock.calls[0][0]).toContain('d."embeddingVersion" = $7');
   });
 
   it('벡터와 키워드 후보에 모두 있는 chunk를 우선한다', () => {
