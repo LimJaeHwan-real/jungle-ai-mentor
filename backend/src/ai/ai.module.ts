@@ -22,10 +22,11 @@ import { RagReindexJob } from './entities/rag-reindex-job.entity';
 import { RagReindexJobItem } from './entities/rag-reindex-job-item.entity';
 import { RagReindexService } from './rag-reindex.service';
 import { WebSearchService } from './web-search.service';
+import { EvidenceAssessmentService } from './evidence-assessment.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([KnowledgeDocument, DocumentChunk, AiQuestion, Faq, User, RagReindexJob, RagReindexJobItem]), AuthModule],
   controllers: [AdminDocumentsController, AdminRagController, AiController, FaqController, McpController],
-  providers: [AgentService, RagService, RagMetricsService, RagReindexService, EmbeddingService, LlmService, FaqService, GithubMcpService, WebSearchService],
+  providers: [AgentService, RagService, RagMetricsService, RagReindexService, EmbeddingService, LlmService, FaqService, GithubMcpService, WebSearchService, EvidenceAssessmentService],
 })
 export class AiModule {}

@@ -48,6 +48,36 @@ describe('WebSearchService 일회성 블로그 검색', () => {
     expect(metrics.recordWebSearchResult).toHaveBeenCalledWith('used', expect.any(Number));
   });
 
+  it('최근 후기에서는 질문 속 두 대상을 검색에 사용하고 고정 정글어를 붙이지 않는다', async () => {
+    const request = jest.spyOn(global, 'fetch').mockResolvedValue(searchedResponse('면접 후기입니다. [1]', [
+      { type: 'url_citation', start_index: 10, end_index: 13, url: 'https://example.tistory.com/review', title: '면접 후기' },
+    ]));
+    const service = new WebSearchService(config() as never, metrics as never);
+
+    await expect(service.search('게임랩, 게임 테크랩 최근 면접 후기 내용을 요약해줘', 'RECENT_REVIEW')).resolves.toMatchObject({
+      references: [{ sourceUrl: 'https://example.tistory.com/review' }],
+    });
+    const body = JSON.parse(String(request.mock.calls[0][1]?.body));
+    expect(body.input).toContain('게임랩, 게임 테크랩 최근 면접 후기 내용을 요약해줘');
+    expect(body.input).toContain('각 대상');
+    expect(body.input).toContain('작성 날짜');
+    expect(body.input).not.toContain('크래프톤 정글');
+  });
+
+  it('공식 사실 질문은 질문 속 주제의 원문을 우선 검색하고 일반 출처도 인용할 수 있다', async () => {
+    const request = jest.spyOn(global, 'fetch').mockResolvedValue(searchedResponse('모집 일정은 공지에 있습니다. [1]', [
+      { type: 'url_citation', start_index: 16, end_index: 19, url: 'https://jungle.krafton.com/news/announcement', title: '공지사항' },
+    ]));
+    const service = new WebSearchService(config() as never, metrics as never);
+
+    await expect(service.search('다음 기수 공식 지원 마감일은 언제인가요?', 'OFFICIAL_FACT')).resolves.toMatchObject({
+      references: [{ sourceUrl: 'https://jungle.krafton.com/news/announcement' }],
+    });
+    const body = JSON.parse(String(request.mock.calls[0][1]?.body));
+    expect(body.input).toContain('공식 원문');
+    expect(body.input).toContain('다음 기수 공식 지원 마감일은 언제인가요?');
+  });
+
   it('블로그 인용이 없거나 검색 호출이 없으면 웹 답변을 채택하지 않는다', async () => {
     const request = jest.spyOn(global, 'fetch')
       .mockResolvedValueOnce(searchedResponse('출처 없는 답변입니다.', []))
@@ -58,7 +88,7 @@ describe('WebSearchService 일회성 블로그 검색', () => {
     await expect(service.search('정글 후기')).resolves.toBeNull();
     expect(request).toHaveBeenCalledTimes(2);
     expect(metrics.recordWebSearchResult).toHaveBeenCalledTimes(2);
-    expect(metrics.recordWebSearchResult).toHaveBeenLastCalledWith('noCitedBlog', expect.any(Number));
+    expect(metrics.recordWebSearchResult).toHaveBeenLastCalledWith('noCitedSource', expect.any(Number));
   });
 
   it('API 오류에는 재시도하거나 임의의 답변을 만들지 않는다', async () => {

@@ -43,7 +43,7 @@ export interface RagMetricsSnapshot {
   webSearch: {
     total: number;
     used: number;
-    noCitedBlog: number;
+    noCitedSource: number;
     failed: number;
     totalDurationMs: number;
     p95DurationMs: number | null;
@@ -62,7 +62,7 @@ export class RagMetricsService {
     retrieval: { fusionRuns: 0, rerankRuns: 0, vectorCandidates: 0, lexicalCandidates: 0, selectedResults: 0, vectorFailures: 0, lexicalFailures: 0 },
     indexing: { created: 0, updated: 0, skipped: 0, failed: 0 },
     embedding: { total: 0, succeeded: 0, failed: 0, retries: 0, totalDurationMs: 0, p95DurationMs: null, recentDurationCount: 0, provider: null, model: null, mode: null, dimension: null },
-    webSearch: { total: 0, used: 0, noCitedBlog: 0, failed: 0, totalDurationMs: 0, p95DurationMs: null, recentDurationCount: 0 },
+    webSearch: { total: 0, used: 0, noCitedSource: 0, failed: 0, totalDurationMs: 0, p95DurationMs: null, recentDurationCount: 0 },
   };
 
   recordSearch(status: RagRetrievalStatus, durationMs: number) {
@@ -121,7 +121,7 @@ export class RagMetricsService {
     embedding.p95DurationMs = sorted[Math.ceil(0.95 * sorted.length) - 1];
   }
 
-  recordWebSearchResult(outcome: 'used' | 'noCitedBlog' | 'failed', durationMs: number) {
+  recordWebSearchResult(outcome: 'used' | 'noCitedSource' | 'failed', durationMs: number) {
     const webSearch = RagMetricsService.snapshot.webSearch;
     webSearch.total += 1;
     webSearch[outcome] += 1;

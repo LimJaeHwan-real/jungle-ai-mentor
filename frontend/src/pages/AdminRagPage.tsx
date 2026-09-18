@@ -38,7 +38,7 @@ interface RagMetrics {
   webSearch: {
     total: number;
     used: number;
-    noCitedBlog: number;
+    noCitedSource: number;
     failed: number;
     p95DurationMs: number | null;
     recentDurationCount: number;
@@ -132,8 +132,8 @@ export function AdminRagPage() {
             </div>
             <h3>일회성 웹 검색</h3>
             <div className="faq-grid">
-              <article className="faq-card"><span>요청 / 인용 블로그 사용</span><strong>{metrics.data.webSearch.total} / {metrics.data.webSearch.used}건</strong></article>
-              <article className="faq-card"><span>인용 블로그 없음 / 호출 실패</span><strong>{metrics.data.webSearch.noCitedBlog} / {metrics.data.webSearch.failed}건</strong></article>
+              <article className="faq-card"><span>요청 / 인용 출처 사용</span><strong>{metrics.data.webSearch.total} / {metrics.data.webSearch.used}건</strong></article>
+              <article className="faq-card"><span>채택할 인용 출처 없음 / 호출 실패</span><strong>{metrics.data.webSearch.noCitedSource} / {metrics.data.webSearch.failed}건</strong></article>
               <article className="faq-card"><span>웹 검색 실패율</span><strong>{metrics.data.webSearch.total === 0 ? '측정 전' : `${(100 * metrics.data.webSearch.failed / metrics.data.webSearch.total).toFixed(1)}%`}</strong></article>
               <article className="faq-card"><span>최근 {metrics.data.webSearch.recentDurationCount}건 웹 검색 지연 p95</span><strong>{metrics.data.webSearch.p95DurationMs === null ? '측정 전' : `${metrics.data.webSearch.p95DurationMs}ms`}</strong></article>
             </div>

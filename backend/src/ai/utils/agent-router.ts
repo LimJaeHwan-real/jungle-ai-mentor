@@ -11,20 +11,5 @@ export function classifyQuestion(question: string, repositoryUrl?: string): Agen
     return AgentRoute.FAQ_SEARCH;
   }
 
-  if (
-    normalized.includes('크래프톤') ||
-    normalized.includes('krafton') ||
-    normalized.includes('jungle') ||
-    normalized.includes('정글') ||
-    normalized.includes('학습') ||
-    normalized.includes('알고리즘') ||
-    normalized.includes('입학') ||
-    normalized.includes('상담') ||
-    normalized.includes('핀토스') ||
-    normalized.includes('부트캠프')
-  ) {
-    return AgentRoute.JUNGLE_KNOWLEDGE;
-  }
-
   return AgentRoute.GENERAL;
 }

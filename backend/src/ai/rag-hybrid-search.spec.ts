@@ -3,6 +3,25 @@ import { RagService, RagSearchResult } from './rag.service';
 const result = (chunkId: string, score = 0, documentId = chunkId): RagSearchResult => ({ chunkId, documentId, title: chunkId, category: 'GENERAL', chunkText: chunkId, score });
 
 describe('RagService RRF 후보 결합', () => {
+  it('내부 검색 후보를 먼저 반환하고 충분성 판정을 별도로 완료한다', async () => {
+    const chunks = { query: jest.fn().mockResolvedValueOnce([result('candidate', 0.5)]).mockResolvedValueOnce([]) };
+    const service = Object.create(RagService.prototype) as any;
+    Object.assign(service, {
+      chunks,
+      embeddings: { embed: jest.fn(async () => [0.1, 0.2]), toSqlVector: jest.fn(() => '[0.1,0.2]'), getMetadata: jest.fn(() => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 })) },
+      evidenceAssessment: { assess: jest.fn(async () => true) },
+      metrics: { recordSearch: jest.fn(), recordRetrievalCandidates: jest.fn(), recordRetrievalFailure: jest.fn() },
+    });
+
+    const candidates = await service.searchCandidatesWithStatus('면접 후기', 4);
+    expect(candidates.status).toBe('CANDIDATES_FOUND');
+    expect(service.evidenceAssessment.assess).not.toHaveBeenCalled();
+    expect(service.metrics.recordSearch).not.toHaveBeenCalled();
+    await expect(service.assessCandidates('면접 후기', candidates)).resolves.toMatchObject({ status: 'SUFFICIENT_EVIDENCE' });
+    expect(service.evidenceAssessment.assess).toHaveBeenCalledTimes(1);
+    expect(service.metrics.recordSearch).toHaveBeenCalledTimes(1);
+  });
+
   it('PostgreSQL FTS와 GIN 인덱스로 lexical 후보를 조회한다', async () => {
     const chunks = { query: jest.fn(async (..._args: unknown[]) => [result('fts-result', 0.8)]) };
     const service = Object.create(RagService.prototype) as {
@@ -40,10 +59,12 @@ describe('RagService RRF 후보 결합', () => {
     Object.assign(service, {
       chunks,
       embeddings: { embed: jest.fn(async () => [0.1, 0.2]), toSqlVector: jest.fn(() => '[0.1,0.2]'), getMetadata: jest.fn(() => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 })) },
+      evidenceAssessment: { assess: jest.fn(async () => false) },
       metrics,
     });
 
-    await expect(service.searchWithStatus('정글', 4)).resolves.toMatchObject({ status: 'SUFFICIENT_EVIDENCE' });
+    await expect(service.searchWithStatus('정글', 4)).resolves.toMatchObject({ status: 'INSUFFICIENT_EVIDENCE' });
+    expect(service.evidenceAssessment.assess).toHaveBeenCalledWith('정글', expect.arrayContaining([expect.objectContaining({ chunkId: 'vector-result' })]));
     const sql = chunks.query.mock.calls[0][0] as string;
     expect(sql).toContain('c."embeddingModel" = $3');
     expect(sql).toContain('c."embeddingDimension" = $6');

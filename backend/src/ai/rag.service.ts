@@ -9,6 +9,7 @@ import { EmbeddingService } from './embedding.service';
 import { RagMetricsService } from './rag-metrics.service';
 import { chunkTextFtsExpression, documentTitleFtsExpression } from '../database/fts-expressions';
 import { chunkMarkdown, MarkdownChunk, RAG_CHUNKING_VERSION } from './utils/markdown-chunker';
+import { EvidenceAssessmentService } from './evidence-assessment.service';
 
 export interface RagSearchResult {
   chunkId: string;
@@ -32,6 +33,12 @@ export type RagRetrievalStatus = 'SUFFICIENT_EVIDENCE' | 'INSUFFICIENT_EVIDENCE'
 export interface RagSearchResponse {
   results: RagSearchResult[];
   status: RagRetrievalStatus;
+}
+
+export interface RagCandidateResponse {
+  results: RagSearchResult[];
+  status: 'CANDIDATES_FOUND' | 'INSUFFICIENT_EVIDENCE' | 'NO_ACTIVE_INDEX' | 'SEARCH_DEGRADED';
+  startedAt: number;
 }
 
 export interface RagIndexResult {
@@ -85,6 +92,7 @@ export class RagService {
     private readonly embeddings: EmbeddingService,
     private readonly dataSource: DataSource,
     private readonly metrics: RagMetricsService,
+    private readonly evidenceAssessment: EvidenceAssessmentService,
   ) {}
 
   async createDocument(dto: CreateDocumentDto) {
@@ -217,6 +225,10 @@ export class RagService {
   }
 
   async searchWithStatus(question: string, limit = 4): Promise<RagSearchResponse> {
+    return this.assessCandidates(question, await this.searchCandidatesWithStatus(question, limit));
+  }
+
+  async searchCandidatesWithStatus(question: string, limit = 4): Promise<RagCandidateResponse> {
     const startedAt = Date.now();
     try {
       const embedding = await this.embeddings.embed(question);
@@ -260,18 +272,28 @@ export class RagService {
       const lexicalRows = await this.lexicalSearch(question, limit);
       const results = this.rerankResults(question, this.mergeSearchResults(rows, lexicalRows, limit));
       this.metrics.recordRetrievalCandidates(rows.length, lexicalRows.length, results.length);
-      const status = this.hasSufficientEvidence(results)
-        ? 'SUFFICIENT_EVIDENCE'
-        : results.length === 0 && !(await this.hasCompatibleActiveIndex(metadata))
-          ? 'NO_ACTIVE_INDEX'
-          : 'INSUFFICIENT_EVIDENCE';
-      return this.completeSearch({ results, status }, startedAt);
+      const status = results.length > 0 ? 'CANDIDATES_FOUND'
+        : await this.hasCompatibleActiveIndex(metadata) ? 'INSUFFICIENT_EVIDENCE' : 'NO_ACTIVE_INDEX';
+      return { results, status, startedAt };
     } catch {
       try {
-        return this.completeSearch({ results: await this.lexicalSearch(question, limit), status: 'SEARCH_DEGRADED' }, startedAt);
+        return { results: await this.lexicalSearch(question, limit), status: 'SEARCH_DEGRADED', startedAt };
       } catch {
-        return this.completeSearch({ results: [], status: 'SEARCH_DEGRADED' }, startedAt);
+        return { results: [], status: 'SEARCH_DEGRADED', startedAt };
       }
+    }
+  }
+
+  async assessCandidates(question: string, candidates: RagCandidateResponse): Promise<RagSearchResponse> {
+    if (candidates.status !== 'CANDIDATES_FOUND') {
+      return this.completeSearch({ results: candidates.results, status: candidates.status }, candidates.startedAt);
+    }
+    try {
+      const status = await this.evidenceAssessment.assess(question, candidates.results)
+        ? 'SUFFICIENT_EVIDENCE' : 'INSUFFICIENT_EVIDENCE';
+      return this.completeSearch({ results: candidates.results, status }, candidates.startedAt);
+    } catch {
+      return this.completeSearch({ results: [], status: 'SEARCH_DEGRADED' }, candidates.startedAt);
     }
   }
 
@@ -416,10 +438,6 @@ export class RagService {
         return { ...result, rerankScore };
       })
       .sort((a, b) => (b.rerankScore ?? 0) - (a.rerankScore ?? 0) || b.score - a.score);
-  }
-
-  private hasSufficientEvidence(results: RagSearchResult[]) {
-    return results.length > 0 && (results[0]?.score ?? 0) >= 1 / 61;
   }
 
   private async hasCompatibleActiveIndex(metadata: ReturnType<EmbeddingService['getMetadata']>) {

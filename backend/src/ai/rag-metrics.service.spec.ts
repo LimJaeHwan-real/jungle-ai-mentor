@@ -14,7 +14,7 @@ describe('RagMetricsService', () => {
       retrieval: { fusionRuns: 0, rerankRuns: 0, vectorCandidates: 0, lexicalCandidates: 0, selectedResults: 0, vectorFailures: 0, lexicalFailures: 0 },
       indexing: { created: 1, updated: 0, skipped: 0, failed: 1 },
       embedding: { total: 0, succeeded: 0, failed: 0, retries: 0, totalDurationMs: 0, p95DurationMs: null, recentDurationCount: 0, provider: null, model: null, mode: null, dimension: null },
-      webSearch: { total: 0, used: 0, noCitedBlog: 0, failed: 0, totalDurationMs: 0, p95DurationMs: null, recentDurationCount: 0 },
+      webSearch: { total: 0, used: 0, noCitedSource: 0, failed: 0, totalDurationMs: 0, p95DurationMs: null, recentDurationCount: 0 },
     });
   });
 
@@ -75,13 +75,13 @@ describe('RagMetricsService', () => {
     const metrics = new RagMetricsService();
     const before = metrics.getSnapshot().webSearch;
     metrics.recordWebSearchResult('used', 12);
-    metrics.recordWebSearchResult('noCitedBlog', 15);
+    metrics.recordWebSearchResult('noCitedSource', 15);
     metrics.recordWebSearchResult('failed', 25);
 
     const after = metrics.getSnapshot().webSearch;
     expect(after.total - before.total).toBe(3);
     expect(after.used - before.used).toBe(1);
-    expect(after.noCitedBlog - before.noCitedBlog).toBe(1);
+    expect(after.noCitedSource - before.noCitedSource).toBe(1);
     expect(after.failed - before.failed).toBe(1);
     expect(after.totalDurationMs - before.totalDurationMs).toBe(52);
     expect(after).not.toHaveProperty('question');
