@@ -90,13 +90,16 @@ export class FaqService {
 
     const termClauses = terms.map((_, index) =>
       `(faq.title ILIKE :faqTerm${index} OR faq.question ILIKE :faqTerm${index} OR faq.answer ILIKE :faqTerm${index})`);
+    const relevanceSql = termClauses.map((clause) => `(CASE WHEN ${clause} THEN 1 ELSE 0 END)`).join(' + ');
     const params = Object.fromEntries(terms.map((term, index) => [`faqTerm${index}`, `%${term}%`]));
     const faqs = await this.faqs.createQueryBuilder('faq')
       .innerJoinAndSelect('faq.aiQuestion', 'question')
       .where(`question."agentState" ->> 'trustedInternalEvidence' = 'true'`)
       .andWhere(`NOT (question."usedTools" ?| ARRAY['BLOG_SEARCH_TOOL', 'WEB_SEARCH_TOOL', 'GITHUB_MCP_TOOL']::text[])`)
       .andWhere(`(${termClauses.join(' OR ')})`, params)
-      .orderBy('faq.viewCount', 'DESC')
+      .addSelect(relevanceSql, 'faq_relevance')
+      .orderBy('faq_relevance', 'DESC')
+      .addOrderBy('faq.viewCount', 'DESC')
       .take(20)
       .getMany();
 

@@ -6,6 +6,11 @@ describe('classifyQuestion', () => {
     expect(classifyQuestion('이 저장소 구조 분석해줘', 'https://github.com/example/repo')).toBe(AgentRoute.GITHUB_REPO);
   });
 
+  it.each(['https://github.com/owner/repo, 구조를 분석해줘', 'https://github.com/owner/repo를 분석해줘'])(
+    'routes a GitHub URL with sentence punctuation or Korean suffix: %s',
+    (question) => expect(classifyQuestion(question)).toBe(AgentRoute.GITHUB_REPO),
+  );
+
   it('routes FAQ wording through GENERAL so FAQs can be internal evidence', () => {
     expect(classifyQuestion('자주 묻는 질문에서 찾아줘')).toBe(AgentRoute.GENERAL);
   });

@@ -1,7 +1,7 @@
 const ignoredOwners = new Set(['features', 'topics', 'marketplace', 'orgs', 'pricing', 'login', 'signup']);
 
 export function extractGithubRepositoryUrls(text: string, limit = 5) {
-  const repositoryUrlRegex = /https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?=$|[\s/#?!)])/g;
+  const repositoryUrlRegex = /https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]*[A-Za-z0-9_-])(?=$|[\s/#?!),;:.가-힣])/g;
   const urls = new Set<string>();
   let match: RegExpExecArray | null;
 

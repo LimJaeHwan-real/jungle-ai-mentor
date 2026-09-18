@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 export interface AnswerContext {
@@ -18,9 +18,7 @@ export class LlmService {
 
   async answer(question: string, contexts: AnswerContext[] = [], extraInstruction?: string) {
     const apiKey = this.config.get<string>('OPENAI_API_KEY');
-    if (!apiKey) {
-      return this.mockAnswer(question, contexts, extraInstruction);
-    }
+    if (!apiKey || contexts.length === 0) throw new ServiceUnavailableException('답변 생성 서비스를 사용할 수 없습니다.');
 
     const contextText = contexts
       .map((context, index) => {
@@ -59,37 +57,14 @@ export class LlmService {
         }),
       });
 
-      if (!response.ok) {
-        return this.mockAnswer(question, contexts, extraInstruction);
-      }
+      if (!response.ok) throw new Error('LLM response failed');
 
       const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-      return data.choices?.[0]?.message?.content ?? this.mockAnswer(question, contexts, extraInstruction);
+      const answer = data.choices?.[0]?.message?.content;
+      if (!answer?.trim()) throw new Error('LLM answer missing');
+      return answer;
     } catch {
-      return this.mockAnswer(question, contexts, extraInstruction);
+      throw new ServiceUnavailableException('답변 생성 서비스를 사용할 수 없습니다.');
     }
-  }
-
-  private mockAnswer(question: string, contexts: AnswerContext[], extraInstruction?: string) {
-    if (contexts.length === 0) {
-      return [
-        `질문 "${question}"에 대한 데모 답변입니다.`,
-        '현재 OPENAI_API_KEY가 없어 mock LLM으로 응답했습니다.',
-        extraInstruction ? `추가 맥락: ${extraInstruction}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n');
-    }
-
-    const references = contexts
-      .slice(0, 3)
-      .map((context, index) => `${context.title}: ${context.content.slice(0, 180)} [${index + 1}]`)
-      .join('\n');
-
-    return [
-      `질문 "${question}"에 대해 등록된 지식 베이스를 우선 참고했습니다.`,
-      references,
-      '실제 OpenAI 키를 설정하면 위 근거를 바탕으로 더 자연스러운 답변이 생성됩니다.',
-    ].join('\n\n');
   }
 }

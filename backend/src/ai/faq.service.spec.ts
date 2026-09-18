@@ -24,7 +24,9 @@ describe('FaqService 내부 근거 후보', () => {
       innerJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
       take: jest.fn().mockReturnThis(),
       getMany: jest.fn(async () => [{
         id: 'faq-1', title: '가상 메모리 학습 안내', question: '핀토스의 가상 메모리는 무엇인가요?',
@@ -43,12 +45,15 @@ describe('FaqService 내부 근거 후보', () => {
     })]);
     expect(qb.andWhere.mock.calls.some(([clause, params]) =>
       String(clause).includes('ILIKE') && JSON.stringify(params).includes('핀토스'))).toBe(true);
+    expect(String(qb.addSelect.mock.calls[0][0])).toContain('CASE');
+    expect(qb.orderBy).toHaveBeenCalledWith('faq_relevance', 'DESC');
+    expect(qb.addOrderBy).toHaveBeenCalledWith('faq.viewCount', 'DESC');
   });
 
   it('출처 확인 표식이 없거나 외부 도구를 사용한 FAQ는 자동 후보에서 제외한다', async () => {
     const qb = {
       innerJoinAndSelect: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockReturnThis(), orderBy: jest.fn().mockReturnThis(), take: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(), addSelect: jest.fn().mockReturnThis(), orderBy: jest.fn().mockReturnThis(), addOrderBy: jest.fn().mockReturnThis(), take: jest.fn().mockReturnThis(),
       getMany: jest.fn(async () => [
         { id: 'old', title: '정글 후기', question: '정글 후기', answer: '예전 요약', aiQuestion: { usedTools: ['RAG_SEARCH_TOOL'], agentState: {} } },
         { id: 'external', title: '정글 후기', question: '정글 후기', answer: '외부 요약', aiQuestion: { usedTools: ['WEB_SEARCH_TOOL'], agentState: { trustedInternalEvidence: true } } },

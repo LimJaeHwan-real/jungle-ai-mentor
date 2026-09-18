@@ -12,4 +12,10 @@ describe('extractGithubRepositoryUrls', () => {
     expect(extractGithubRepositoryUrls('https://github.com/owner/repo@other.example')).toEqual([]);
     expect(extractGithubRepositoryUrls('https://github.com.evil.example/owner/repo')).toEqual([]);
   });
+
+  it('문장 속 쉼표와 한국어 조사가 붙은 유효한 저장소 URL을 추출한다', () => {
+    expect(extractGithubRepositoryUrls('https://github.com/owner/repo, 구조를 분석해줘')).toEqual(['https://github.com/owner/repo']);
+    expect(extractGithubRepositoryUrls('https://github.com/owner/repo를 분석해줘')).toEqual(['https://github.com/owner/repo']);
+    expect(extractGithubRepositoryUrls('https://github.com/owner/repo.')).toEqual(['https://github.com/owner/repo']);
+  });
 });

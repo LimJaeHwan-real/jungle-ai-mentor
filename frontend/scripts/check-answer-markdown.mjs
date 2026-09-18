@@ -57,6 +57,8 @@ try {
     assert.equal(answerStatusLabel('INTERNAL_SEARCH_FAILED'), '내부 검색 장애');
     assert.equal(answerStatusLabel('INTERNAL_EVIDENCE'), '내부 근거 답변');
     assert.equal(answerStatusLabel('WEB_EVIDENCE'), '웹 근거 답변');
+    assert.equal(answerStatusLabel('GITHUB_ANALYSIS_FAILED'), 'GitHub 분석 실패');
+    assert.equal(answerStatusLabel('ANSWER_GENERATION_FAILED'), '답변 생성 실패');
   });
 } finally {
   await server.close();

@@ -259,6 +259,34 @@ describe('AgentService 검색 장애 처리', () => {
     expect(github.analyze).toHaveBeenCalledTimes(1);
   });
 
+  it('내부 근거가 충분해도 답변 생성 장애에는 기록이나 신뢰 FAQ 표식을 만들지 않는다', async () => {
+    const candidate = { chunkId: 'chunk-1', documentId: 'document-1', title: '정글 후기', chunkText: '팀 프로젝트를 진행했습니다.', category: 'BOARD_POST', score: 0.2 };
+    const rag = { searchWithStatus: jest.fn(async () => ({ results: [candidate], status: 'SUFFICIENT_EVIDENCE' })) };
+    const llm = { answer: jest.fn(async () => { throw new Error('model unavailable'); }) };
+    const repository = questions();
+    const service = new AgentService(repository as never, rag as never, emptyFaq as never, {} as never, llm as never, {} as never);
+
+    const response = await service.ask({ id: 'user-1' } as never, { question: '팀 프로젝트가 있나요?' });
+
+    expect(response).toMatchObject({ id: null, answerStatus: 'ANSWER_GENERATION_FAILED', references: [] });
+    expect(response.agentState.trustedInternalEvidence).toBeUndefined();
+    expect(repository.save).not.toHaveBeenCalled();
+  });
+
+  it('GitHub 조회가 모의 결과로 대체되면 근거 있는 분석으로 표시하거나 LLM에 전달하지 않는다', async () => {
+    const repository = questions();
+    const github = { analyze: jest.fn(async () => ({ repositoryUrl: 'https://github.com/jungle/example', owner: 'jungle', repo: 'example', summary: 'Mock README', fallback: true })) };
+    const llm = { answer: jest.fn() };
+    const service = new AgentService(repository as never, {} as never, {} as never, github as never, llm as never, {} as never);
+
+    const response = await service.ask({ id: 'user-1' } as never, { question: 'https://github.com/jungle/example 저장소를 분석해줘' });
+
+    expect(response).toMatchObject({ id: null, answerStatus: 'GITHUB_ANALYSIS_FAILED', references: [] });
+    expect(response.answer).toContain('GitHub 저장소 내용을 확인하지 못했습니다');
+    expect(llm.answer).not.toHaveBeenCalled();
+    expect(repository.save).not.toHaveBeenCalled();
+  });
+
   it('GENERAL 질문은 FAQ와 게시글 후보를 함께 판정하고 선택된 FAQ 근거만 답변에 사용한다', async () => {
     const repository = questions();
     const faqResult = { faqId: 'faq-1', chunkId: 'faq:faq-1', documentId: 'faq:faq-1', title: '가상 메모리 안내', chunkText: '페이지 테이블을 먼저 공부하세요.', category: 'FAQ', score: 0.5 };

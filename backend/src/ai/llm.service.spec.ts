@@ -28,4 +28,13 @@ describe('LlmService 근거 출처 전달', () => {
     expect(context).toContain('원문 범위: 15-30');
     expect(body.messages[0].content).toContain('근거 번호');
   });
+
+  it('API 키가 없거나 모델 호출이 실패하면 모의 근거 답변을 반환하지 않는다', async () => {
+    const noKey = new LlmService({ get: () => undefined } as never);
+    await expect(noKey.answer('질문', [{ title: '근거', content: '본문' }])).rejects.toThrow('답변 생성 서비스');
+
+    jest.spyOn(global, 'fetch').mockResolvedValue({ ok: false, status: 500 } as Response);
+    const failedApi = new LlmService({ get: (name: string) => name === 'OPENAI_API_KEY' ? 'test-placeholder' : undefined } as never);
+    await expect(failedApi.answer('질문', [{ title: '근거', content: '본문' }])).rejects.toThrow('답변 생성 서비스');
+  });
 });
