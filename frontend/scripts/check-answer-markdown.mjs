@@ -37,6 +37,12 @@ try {
     assert.match(html, /rel="noopener noreferrer"/);
   });
 
+  await test('검증된 FAQ 근거 번호를 내부 FAQ 상세 링크로 표시한다', () => {
+    const html = render('가상 메모리를 공부하세요. [1]', [{ faqId: 'faq-1' }]);
+    assert.match(html, /href="\/faq\/faq-1"/);
+    assert.match(html, /가상 메모리를 공부하세요/);
+  });
+
   await test('외부 이미지와 HTML, 실행 가능한 주소를 렌더링하지 않는다', () => {
     const html = render('![그림](https://example.org/track.png) <script>alert(1)</script> [링크](javascript:alert(1))');
     assert.doesNotMatch(html, /<img|<script|href="javascript:/);

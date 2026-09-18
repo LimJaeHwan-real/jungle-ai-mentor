@@ -2,6 +2,7 @@ import { AgentService } from './agent.service';
 import { AgentRoute } from './entities/ai-question.entity';
 
 describe('AgentService 검색 장애 처리', () => {
+  const emptyFaq = { searchForAgent: jest.fn(async () => []) };
   const questions = () => ({
     create: jest.fn((value) => value),
     save: jest.fn(async (value) => ({ ...value, id: 'question-1', isPublic: false, createdAt: new Date() })),
@@ -16,7 +17,7 @@ describe('AgentService 검색 장애 처리', () => {
     const reference = { type: 'WEB_SEARCH', title: '게임랩 면접 후기', sourceUrl: 'https://example.tistory.com/review', startIndex: 8, endIndex: 11 };
     const webSearch = { search: jest.fn(async () => ({ answer: '게임랩 면접 후기 [1]', references: [reference] })) };
     const llm = { answer: jest.fn() };
-    const service = new AgentService(repository as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
+    const service = new AgentService(repository as never, rag as never, emptyFaq as never, {} as never, llm as never, webSearch as never);
     const question = '게임랩, 게임 테크랩 최근 면접 후기 내용을 요약해줘';
 
     const response = await service.ask({ id: 'user-1' } as never, { question });
@@ -39,7 +40,7 @@ describe('AgentService 검색 장애 처리', () => {
       assessCandidates: jest.fn(() => new Promise((resolve) => { finishAssessment = resolve; })),
     };
     const webSearch = { search: jest.fn(async () => ({ answer: '최근 후기 [1]', references: [{ type: 'WEB_SEARCH', sourceUrl: 'https://example.tistory.com/review' }] })) };
-    const service = new AgentService(questions() as never, rag as never, {} as never, {} as never, { answer: jest.fn() } as never, webSearch as never);
+    const service = new AgentService(questions() as never, rag as never, emptyFaq as never, {} as never, { answer: jest.fn() } as never, webSearch as never);
 
     const pending = service.ask({ id: 'user-1' } as never, { question: '최근 면접 후기 알려줘' });
     await new Promise((resolve) => setImmediate(resolve));
@@ -58,7 +59,7 @@ describe('AgentService 검색 장애 처리', () => {
     const webSearch = { search: jest.fn(async () => null) };
     const llm = { answer: jest.fn(async () => '알고리즘 질문이 있었습니다. [1]') };
     const repository = questions();
-    const service = new AgentService(repository as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
+    const service = new AgentService(repository as never, rag as never, emptyFaq as never, {} as never, llm as never, webSearch as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '최근 면접 후기 알려줘' });
 
@@ -77,7 +78,7 @@ describe('AgentService 검색 장애 처리', () => {
     const webSearch = { search: jest.fn(async () => ({ answer: '웹 후기 [1]', references: [reference] })) };
     const llm = { answer: jest.fn() };
     const repository = questions();
-    const service = new AgentService(repository as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
+    const service = new AgentService(repository as never, rag as never, emptyFaq as never, {} as never, llm as never, webSearch as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '최근 면접 후기 알려줘' });
 
@@ -96,7 +97,7 @@ describe('AgentService 검색 장애 처리', () => {
     };
     const webSearch = { search: jest.fn(async () => ({ answer: '웹 후기 [1]', references: [{ type: 'WEB_SEARCH', sourceUrl: 'https://example.tistory.com/review' }] })) };
     const repository = questions();
-    const service = new AgentService(repository as never, rag as never, {} as never, {} as never, { answer: jest.fn() } as never, webSearch as never);
+    const service = new AgentService(repository as never, rag as never, emptyFaq as never, {} as never, { answer: jest.fn() } as never, webSearch as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '최근 면접 후기 알려줘' });
 
@@ -113,7 +114,7 @@ describe('AgentService 검색 장애 처리', () => {
       assessCandidates: jest.fn(async () => ({ results: [], status: 'SEARCH_DEGRADED' })),
     };
     const webSearch = { search: jest.fn() };
-    const service = new AgentService(questions() as never, rag as never, {} as never, {} as never, { answer: jest.fn() } as never, webSearch as never);
+    const service = new AgentService(questions() as never, rag as never, emptyFaq as never, {} as never, { answer: jest.fn() } as never, webSearch as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '최근 면접 후기 알려줘' });
 
@@ -124,7 +125,7 @@ describe('AgentService 검색 장애 처리', () => {
   it('공식 사실의 내부 근거가 부족하면 공식 원문 검색을 요청한다', async () => {
     const rag = { searchWithStatus: jest.fn(async () => ({ results: [], status: 'INSUFFICIENT_EVIDENCE' })) };
     const webSearch = { search: jest.fn(async () => null) };
-    const service = new AgentService(questions() as never, rag as never, {} as never, {} as never, { answer: jest.fn() } as never, webSearch as never);
+    const service = new AgentService(questions() as never, rag as never, emptyFaq as never, {} as never, { answer: jest.fn() } as never, webSearch as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '등록금 환불 규정은 무엇인가요?' });
 
@@ -136,7 +137,7 @@ describe('AgentService 검색 장애 처리', () => {
     const rag = { searchWithStatus: jest.fn(async () => ({ results: [{ chunkId: 'weak-chunk' }], status: 'INSUFFICIENT_EVIDENCE' })) };
     const llm = { answer: jest.fn() };
     const webSearch = { search: jest.fn(async () => null) };
-    const service = new AgentService(questions() as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
+    const service = new AgentService(questions() as never, rag as never, emptyFaq as never, {} as never, llm as never, webSearch as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '정글 합격률은 몇 퍼센트인가요?' });
 
@@ -151,7 +152,7 @@ describe('AgentService 검색 장애 처리', () => {
     const rag = { searchWithStatus: jest.fn(async () => ({ results: [], status: 'INSUFFICIENT_EVIDENCE' })) };
     const llm = { answer: jest.fn() };
     const webSearch = { search: jest.fn(async () => null) };
-    const service = new AgentService(questions() as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
+    const service = new AgentService(questions() as never, rag as never, emptyFaq as never, {} as never, llm as never, webSearch as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '정글 합격률은 몇 퍼센트인가요?', autoBlogSearch: false } as never);
 
@@ -170,7 +171,7 @@ describe('AgentService 검색 장애 처리', () => {
     const repository = questions();
     const reference = { type: 'WEB_SEARCH', title: '정글 후기', sourceUrl: 'https://jungle.tistory.com/123', startIndex: 8, endIndex: 11 };
     const webSearch = { search: jest.fn(async () => ({ answer: '정글 생활 후기 [1]', references: [reference] })) };
-    const service = new AgentService(repository as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
+    const service = new AgentService(repository as never, rag as never, emptyFaq as never, {} as never, llm as never, webSearch as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '정글 과정에 팀 프로젝트가 있나요?' });
 
@@ -189,7 +190,7 @@ describe('AgentService 검색 장애 처리', () => {
     const rag = { searchWithStatus: jest.fn(async () => ({ results: [], status: 'INSUFFICIENT_EVIDENCE' })) };
     const llm = { answer: jest.fn() };
     const webSearch = { search: jest.fn(async () => { throw new Error('external search failed'); }) };
-    const service = new AgentService(questions() as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
+    const service = new AgentService(questions() as never, rag as never, emptyFaq as never, {} as never, llm as never, webSearch as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '정글 준비 방법 알려줘' });
 
@@ -207,7 +208,7 @@ describe('AgentService 검색 장애 처리', () => {
     const llm = { answer: jest.fn()
       .mockResolvedValueOnce('팀 프로젝트가 포함됩니다.')
       .mockResolvedValueOnce('팀 프로젝트가 포함됩니다. [2]') };
-    const service = new AgentService(questions() as never, rag as never, {} as never, {} as never, llm as never, {} as never);
+    const service = new AgentService(questions() as never, rag as never, emptyFaq as never, {} as never, llm as never, {} as never);
 
     const missing = await service.ask({ id: 'user-1' } as never, { question: '정글 과정에 팀 프로젝트가 있나요?' });
     const invalid = await service.ask({ id: 'user-1' } as never, { question: '정글 과정에 팀 프로젝트가 있나요?' });
@@ -218,21 +219,21 @@ describe('AgentService 검색 장애 처리', () => {
     expect(invalid.agentState.answerCitationStatus).toBe('MISSING_OR_INVALID');
   });
 
-  it('GitHub 분석이 추가되어도 참고 근거 번호와 LLM 컨텍스트 순서를 일치시킨다', async () => {
+  it('GENERAL 내부 게시글에 GitHub URL이 있어도 별도 외부 분석을 시작하지 않는다', async () => {
     const selected = { chunkId: 'chunk-1', documentId: 'document-1', title: '프로젝트 자료', chunkText: 'https://github.com/jungle/example 저장소를 참고합니다.', category: 'BOARD_POST', score: 0.3 };
-    const analysis = { repositoryUrl: 'https://github.com/jungle/example', owner: 'jungle', repo: 'example', summary: '학습 저장소', fallback: false };
     const rag = { searchWithStatus: jest.fn(async () => ({ results: [selected], status: 'SUFFICIENT_EVIDENCE' })) };
-    const github = { analyze: jest.fn(async () => analysis) };
-    const llm = { answer: jest.fn(async (_question: string, _contexts: { title: string }[]) => '프로젝트 자료를 참고했습니다. [1] 저장소 요약은 학습용입니다. [2]') };
+    const github = { analyze: jest.fn() };
+    const llm = { answer: jest.fn(async (_question: string, _contexts: { title: string }[]) => '프로젝트 자료를 참고했습니다. [1]') };
     const repository = questions();
-    const service = new AgentService(repository as never, rag as never, {} as never, github as never, llm as never, {} as never);
+    const service = new AgentService(repository as never, rag as never, emptyFaq as never, github as never, llm as never, {} as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '정글 프로젝트 자료를 설명해 주세요.' });
 
-    expect(response.references).toEqual([selected, analysis]);
-    expect(llm.answer.mock.calls[0][1].map((context: { title: string }) => context.title)).toEqual(['프로젝트 자료', 'GitHub repository: jungle/example']);
+    expect(response.references).toEqual([selected]);
+    expect(llm.answer.mock.calls[0][1].map((context: { title: string }) => context.title)).toEqual(['프로젝트 자료']);
     expect(response.agentState.answerCitationStatus).toBe('CITATION_IDS_VALID');
-    expect(repository.save).not.toHaveBeenCalled();
+    expect(github.analyze).not.toHaveBeenCalled();
+    expect(repository.save).toHaveBeenCalledTimes(1);
   });
 
   it('직접 요청한 GitHub 분석 답변도 질문 기록에 저장하지 않는다', async () => {
@@ -248,6 +249,74 @@ describe('AgentService 검색 장애 처리', () => {
     expect(github.analyze).toHaveBeenCalledTimes(1);
   });
 
+  it('GENERAL 질문은 FAQ와 게시글 후보를 함께 판정하고 선택된 FAQ 근거만 답변에 사용한다', async () => {
+    const repository = questions();
+    const faqResult = { faqId: 'faq-1', chunkId: 'faq:faq-1', documentId: 'faq:faq-1', title: '가상 메모리 안내', chunkText: '페이지 테이블을 먼저 공부하세요.', category: 'FAQ', score: 0.5 };
+    const faq = { searchForAgent: jest.fn(async () => [faqResult]) };
+    const rag = { searchWithStatus: jest.fn(async () => ({ results: [faqResult], status: 'SUFFICIENT_EVIDENCE' })) };
+    const llm = { answer: jest.fn(async (_question: string, _contexts: { title: string }[]) => '페이지 테이블을 공부하세요. [1]') };
+    const github = { analyze: jest.fn() };
+    const webSearch = { search: jest.fn() };
+    const service = new AgentService(repository as never, rag as never, faq as never, github as never, llm as never, webSearch as never);
+
+    const response = await service.ask({ id: 'user-1' } as never, { question: '핀토스에서 가상 메모리를 준비하는 법은?' });
+
+    expect(faq.searchForAgent).toHaveBeenCalledTimes(1);
+    expect(rag.searchWithStatus).toHaveBeenCalledWith('핀토스에서 가상 메모리를 준비하는 법은?', 4, [faqResult]);
+    expect(llm.answer.mock.calls[0][1]).toEqual([expect.objectContaining({ title: faqResult.title })]);
+    expect(response.references).toEqual([faqResult]);
+    expect(response.agentState.trustedInternalEvidence).toBe(true);
+    expect(repository.save).toHaveBeenCalledTimes(1);
+    expect(github.analyze).not.toHaveBeenCalled();
+    expect(webSearch.search).not.toHaveBeenCalled();
+  });
+
+  it('FAQ 조회 장애를 웹 검색으로 감추지 않는다', async () => {
+    const faq = { searchForAgent: jest.fn(async () => { throw new Error('db unavailable'); }) };
+    const rag = { searchWithStatus: jest.fn() };
+    const llm = { answer: jest.fn() };
+    const webSearch = { search: jest.fn() };
+    const service = new AgentService(questions() as never, rag as never, faq as never, {} as never, llm as never, webSearch as never);
+
+    const response = await service.ask({ id: 'user-1' } as never, { question: '정글 일정은?' });
+
+    expect(response.retrievalStatus).toBe('SEARCH_DEGRADED');
+    expect(response.answer).toContain('근거 검색 서비스');
+    expect(rag.searchWithStatus).not.toHaveBeenCalled();
+    expect(webSearch.search).not.toHaveBeenCalled();
+    expect(llm.answer).not.toHaveBeenCalled();
+  });
+
+  it('GitHub 키워드만 있고 저장소 URL이 없으면 분석이나 LLM 호출 없이 주소를 요청한다', async () => {
+    const repository = questions();
+    const github = { analyze: jest.fn() };
+    const llm = { answer: jest.fn() };
+    const service = new AgentService(repository as never, {} as never, {} as never, github as never, llm as never, {} as never);
+
+    const response = await service.ask({ id: 'user-1' } as never, { question: '깃허브로 공부하는 법을 알려줘' });
+
+    expect(response.agentRoute).toBe(AgentRoute.GITHUB_REPO);
+    expect(response.answer).toContain('GitHub 저장소 URL');
+    expect(response.references).toEqual([]);
+    expect(github.analyze).not.toHaveBeenCalled();
+    expect(llm.answer).not.toHaveBeenCalled();
+    expect(repository.save).not.toHaveBeenCalled();
+  });
+
+  it('질문에 있는 GitHub URL만 정규화해 분석기에 전달한다', async () => {
+    const repository = questions();
+    const github = { analyze: jest.fn(async () => ({ repositoryUrl: 'https://github.com/jungle/example', owner: 'jungle', repo: 'example', summary: '학습 저장소', fallback: false })) };
+    const llm = { answer: jest.fn(async (_question: string, _contexts: { sourceUrl?: string }[]) => '학습 저장소입니다. [1]') };
+    const service = new AgentService(repository as never, {} as never, {} as never, github as never, llm as never, {} as never);
+
+    const response = await service.ask({ id: 'user-1' } as never, { question: 'https://github.com/jungle/example.git 구조를 알려줘' });
+
+    expect(github.analyze).toHaveBeenCalledWith('https://github.com/jungle/example');
+    expect(llm.answer.mock.calls[0][1]).toEqual([expect.objectContaining({ sourceUrl: 'https://github.com/jungle/example' })]);
+    expect(response.id).toBeNull();
+    expect(repository.save).not.toHaveBeenCalled();
+  });
+
   it('검색 장애 상태에서는 LLM 답변과 외부 검색을 실행하지 않는다', async () => {
     const questions = {
       create: jest.fn((value) => value),
@@ -256,7 +325,7 @@ describe('AgentService 검색 장애 처리', () => {
     const rag = { searchWithStatus: jest.fn(async () => ({ results: [{ chunkId: 'chunk-1' }], status: 'SEARCH_DEGRADED' })) };
     const llm = { answer: jest.fn() };
     const webSearch = { search: jest.fn() };
-    const service = new AgentService(questions as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
+    const service = new AgentService(questions as never, rag as never, emptyFaq as never, {} as never, llm as never, webSearch as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '정글 지원 일정 알려줘' });
 
@@ -275,7 +344,7 @@ describe('AgentService 검색 장애 처리', () => {
     const rag = { searchWithStatus: jest.fn(async () => ({ results: [], status: 'NO_ACTIVE_INDEX' })) };
     const llm = { answer: jest.fn() };
     const webSearch = { search: jest.fn() };
-    const service = new AgentService(questions as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
+    const service = new AgentService(questions as never, rag as never, emptyFaq as never, {} as never, llm as never, webSearch as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '정글 지원 일정 알려줘' });
 

@@ -14,6 +14,7 @@ import { EvidenceAssessmentService } from './evidence-assessment.service';
 export interface RagSearchResult {
   chunkId: string;
   documentId: string;
+  faqId?: string;
   title: string;
   category: string;
   sourceUrl?: string;
@@ -224,8 +225,8 @@ export class RagService {
     return (await this.searchWithStatus(question, limit)).results;
   }
 
-  async searchWithStatus(question: string, limit = 4): Promise<RagSearchResponse> {
-    return this.assessCandidates(question, await this.searchCandidatesWithStatus(question, limit));
+  async searchWithStatus(question: string, limit = 4, extraCandidates: RagSearchResult[] = []): Promise<RagSearchResponse> {
+    return this.assessCandidates(question, await this.searchCandidatesWithStatus(question, limit), extraCandidates);
   }
 
   async searchCandidatesWithStatus(question: string, limit = 4): Promise<RagCandidateResponse> {
@@ -284,14 +285,19 @@ export class RagService {
     }
   }
 
-  async assessCandidates(question: string, candidates: RagCandidateResponse): Promise<RagSearchResponse> {
-    if (candidates.status !== 'CANDIDATES_FOUND') {
+  async assessCandidates(question: string, candidates: RagCandidateResponse, extraCandidates: RagSearchResult[] = []): Promise<RagSearchResponse> {
+    if (candidates.status === 'NO_ACTIVE_INDEX' || candidates.status === 'SEARCH_DEGRADED') {
       return this.completeSearch({ results: candidates.results, status: candidates.status }, candidates.startedAt);
     }
+    const combined = [...candidates.results, ...extraCandidates];
+    if (combined.length === 0) {
+      return this.completeSearch({ results: [], status: 'INSUFFICIENT_EVIDENCE' }, candidates.startedAt);
+    }
     try {
-      const status = await this.evidenceAssessment.assess(question, candidates.results)
-        ? 'SUFFICIENT_EVIDENCE' : 'INSUFFICIENT_EVIDENCE';
-      return this.completeSearch({ results: candidates.results, status }, candidates.startedAt);
+      const supportingIds = new Set(await this.evidenceAssessment.assess(question, combined));
+      const results = combined.filter((result) => supportingIds.has(result.chunkId));
+      const status = results.length > 0 ? 'SUFFICIENT_EVIDENCE' : 'INSUFFICIENT_EVIDENCE';
+      return this.completeSearch({ results, status }, candidates.startedAt);
     } catch {
       return this.completeSearch({ results: [], status: 'SEARCH_DEGRADED' }, candidates.startedAt);
     }

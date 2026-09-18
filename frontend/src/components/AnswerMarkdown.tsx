@@ -7,7 +7,7 @@ interface AnswerMarkdownProps {
   references?: AiReference[];
 }
 
-function publicUrl(value?: string) {
+export function publicUrl(value?: string) {
   if (!value) return null;
   try {
     const url = new URL(value);
@@ -15,6 +15,11 @@ function publicUrl(value?: string) {
   } catch {
     return null;
   }
+}
+
+function safeHref(value?: string) {
+  if (value && /^\/faq\/[A-Za-z0-9_-]+$/.test(value)) return value;
+  return publicUrl(value);
 }
 
 function citationMarkdown(answer: string, references: AiReference[]) {
@@ -29,6 +34,17 @@ function citationMarkdown(answer: string, references: AiReference[]) {
     group.links.push({ index, url });
     grouped.set(key, group);
   });
+  for (const match of answer.matchAll(/\[(\d+)\]/g)) {
+    const index = Number(match[1]) - 1;
+    const faqId = references[index]?.faqId;
+    if (!faqId || !/^[A-Za-z0-9_-]+$/.test(faqId) || match.index === undefined) continue;
+    const start = match.index;
+    const end = start + match[0].length;
+    const key = `${start}:${end}`;
+    const group = grouped.get(key) ?? { start, end, links: [] };
+    group.links.push({ index, url: `/faq/${faqId}` });
+    grouped.set(key, group);
+  }
 
   let result = '';
   let cursor = 0;
@@ -54,8 +70,8 @@ export function AnswerMarkdown({ answer, references = [] }: AnswerMarkdownProps)
         skipHtml
         components={{
           a: ({ href, children }) => {
-            const url = publicUrl(href);
-            return url ? <a href={url} target="_blank" rel="noopener noreferrer">{children}</a> : <span>{children}</span>;
+            const url = safeHref(href);
+            return url ? <a href={url} target={url.startsWith('/faq/') ? undefined : '_blank'} rel="noopener noreferrer">{children}</a> : <span>{children}</span>;
           },
           img: ({ alt }) => <span>{alt ?? ''}</span>,
         }}

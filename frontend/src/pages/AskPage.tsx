@@ -1,9 +1,10 @@
 import { FormEvent, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Bot, ExternalLink, Search, Send, UploadCloud } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api, getErrorMessage } from '../api';
 import { AiAnswer, Faq } from '../types';
-import { AnswerMarkdown } from '../components/AnswerMarkdown';
+import { AnswerMarkdown, publicUrl } from '../components/AnswerMarkdown';
 
 export function AskPage() {
   const [question, setQuestion] = useState('');
@@ -86,7 +87,7 @@ export function AskPage() {
                 </span>
               ))}
             </div>
-            <AnswerMarkdown answer={answer.answer} references={answer.externalAugmentationStatus === 'EVIDENCE_USED' ? answer.references : []} />
+            <AnswerMarkdown answer={answer.answer} references={answer.references} />
             <section className="reference-section">
               <div className="section-heading compact">
                 <h3>참고 근거</h3>
@@ -102,8 +103,9 @@ export function AskPage() {
                       <strong>[{index + 1}] {reference.title ?? '참고 문서'}</strong>
                       {reference.sectionPath && <small>문서 위치: {reference.sectionPath}</small>}
                       {reference.chunkId && <small>근거 chunk: {reference.chunkId}</small>}
-                      {reference.sourceUrl && (
-                        <a href={reference.sourceUrl} target="_blank" rel="noreferrer">
+                      {reference.faqId && <Link to={`/faq/${reference.faqId}`}>FAQ 원문 열기</Link>}
+                      {publicUrl(reference.sourceUrl) && (
+                        <a href={publicUrl(reference.sourceUrl)!} target="_blank" rel="noopener noreferrer">
                           출처 열기 <ExternalLink size={14} />
                         </a>
                       )}

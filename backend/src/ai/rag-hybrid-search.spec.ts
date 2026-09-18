@@ -3,13 +3,59 @@ import { RagService, RagSearchResult } from './rag.service';
 const result = (chunkId: string, score = 0, documentId = chunkId): RagSearchResult => ({ chunkId, documentId, title: chunkId, category: 'GENERAL', chunkText: chunkId, score });
 
 describe('RagService RRF 후보 결합', () => {
+  it('게시글 후보가 없어도 활성 색인이 있으면 FAQ 후보를 함께 판정한다', async () => {
+    const faq = { ...result('faq:faq-1'), faqId: 'faq-1', category: 'FAQ' };
+    const service = Object.create(RagService.prototype) as any;
+    Object.assign(service, {
+      searchCandidatesWithStatus: jest.fn(async () => ({ results: [], status: 'INSUFFICIENT_EVIDENCE', startedAt: Date.now() })),
+      evidenceAssessment: { assess: jest.fn(async () => ['faq:faq-1']) },
+      metrics: { recordSearch: jest.fn() },
+    });
+
+    const response = await service.searchWithStatus('가상 메모리', 4, [faq]);
+
+    expect(response).toEqual({ status: 'SUFFICIENT_EVIDENCE', results: [faq] });
+    expect(service.evidenceAssessment.assess).toHaveBeenCalledWith('가상 메모리', [faq]);
+  });
+
+  it('활성 색인이 없으면 FAQ 후보로 장애를 숨기지 않는다', async () => {
+    const faq = { ...result('faq:faq-1'), faqId: 'faq-1', category: 'FAQ' };
+    const service = Object.create(RagService.prototype) as any;
+    Object.assign(service, {
+      searchCandidatesWithStatus: jest.fn(async () => ({ results: [], status: 'NO_ACTIVE_INDEX', startedAt: Date.now() })),
+      evidenceAssessment: { assess: jest.fn() },
+      metrics: { recordSearch: jest.fn() },
+    });
+
+    const response = await service.searchWithStatus('가상 메모리', 4, [faq]);
+
+    expect(response).toEqual({ status: 'NO_ACTIVE_INDEX', results: [] });
+    expect(service.evidenceAssessment.assess).not.toHaveBeenCalled();
+  });
+
+  it('근거 판정이 선택한 FAQ와 게시글만 답변 후보로 반환한다', async () => {
+    const service = Object.create(RagService.prototype) as any;
+    Object.assign(service, {
+      evidenceAssessment: { assess: jest.fn(async () => ['faq:faq-1']) },
+      metrics: { recordSearch: jest.fn() },
+    });
+    const post = result('post-1');
+    const faq = { ...result('faq:faq-1'), faqId: 'faq-1', category: 'FAQ' };
+
+    const response = await service.assessCandidates('가상 메모리', {
+      results: [post, faq], status: 'CANDIDATES_FOUND', startedAt: Date.now(),
+    });
+
+    expect(response).toEqual({ status: 'SUFFICIENT_EVIDENCE', results: [faq] });
+  });
+
   it('내부 검색 후보를 먼저 반환하고 충분성 판정을 별도로 완료한다', async () => {
     const chunks = { query: jest.fn().mockResolvedValueOnce([result('candidate', 0.5)]).mockResolvedValueOnce([]) };
     const service = Object.create(RagService.prototype) as any;
     Object.assign(service, {
       chunks,
       embeddings: { embed: jest.fn(async () => [0.1, 0.2]), toSqlVector: jest.fn(() => '[0.1,0.2]'), getMetadata: jest.fn(() => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 })) },
-      evidenceAssessment: { assess: jest.fn(async () => true) },
+      evidenceAssessment: { assess: jest.fn(async () => ['candidate']) },
       metrics: { recordSearch: jest.fn(), recordRetrievalCandidates: jest.fn(), recordRetrievalFailure: jest.fn() },
     });
 
@@ -59,7 +105,7 @@ describe('RagService RRF 후보 결합', () => {
     Object.assign(service, {
       chunks,
       embeddings: { embed: jest.fn(async () => [0.1, 0.2]), toSqlVector: jest.fn(() => '[0.1,0.2]'), getMetadata: jest.fn(() => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 })) },
-      evidenceAssessment: { assess: jest.fn(async () => false) },
+      evidenceAssessment: { assess: jest.fn(async () => []) },
       metrics,
     });
 

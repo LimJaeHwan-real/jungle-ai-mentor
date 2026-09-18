@@ -13,7 +13,7 @@ describe('EvidenceAssessmentService', () => {
 
   it('후보가 없으면 모델을 호출하지 않고 부족으로 판정한다', async () => {
     const request = jest.spyOn(global, 'fetch');
-    await expect(new EvidenceAssessmentService(config as never).assess('질문', [])).resolves.toBe(false);
+    await expect(new EvidenceAssessmentService(config as never).assess('질문', [])).resolves.toEqual([]);
     expect(request).not.toHaveBeenCalled();
   });
 
@@ -21,13 +21,13 @@ describe('EvidenceAssessmentService', () => {
     const request = jest.spyOn(global, 'fetch');
     const mockConfig = { get: (name: string) => ({ OPENAI_API_KEY: '', RAG_EMBEDDING_MODE: 'mock', NODE_ENV: 'development' })[name as 'OPENAI_API_KEY'] };
 
-    await expect(new EvidenceAssessmentService(mockConfig as never).assess('데모 질문', [candidate])).resolves.toBe(true);
+    await expect(new EvidenceAssessmentService(mockConfig as never).assess('데모 질문', [candidate])).resolves.toEqual(['chunk-1']);
     expect(request).not.toHaveBeenCalled();
   });
 
   it('관련 없는 벡터 후보는 근거 부족이라는 모델 판정을 따른다', async () => {
     const request = jest.spyOn(global, 'fetch').mockResolvedValue(completed('{"sufficient":false,"supportingChunkIds":[]}'));
-    await expect(new EvidenceAssessmentService(config as never).assess('게임랩 최근 면접 후기', [candidate])).resolves.toBe(false);
+    await expect(new EvidenceAssessmentService(config as never).assess('게임랩 최근 면접 후기', [candidate])).resolves.toEqual([]);
     const body = JSON.parse(request.mock.calls[0][1]?.body as string);
     expect(body.store).toBe(false);
     expect(body.messages[1].content).toContain('게임랩 최근 면접 후기');
@@ -42,9 +42,9 @@ describe('EvidenceAssessmentService', () => {
       .mockResolvedValueOnce(completed('{"sufficient":true,"supportingChunkIds":["unknown"]}'))
       .mockResolvedValueOnce(completed('{"sufficient":true,"supportingChunkIds":[]}'));
     const service = new EvidenceAssessmentService(config as never);
-    await expect(service.assess('면접 질문은 무엇인가요?', [candidate])).resolves.toBe(true);
-    await expect(service.assess('면접 질문은 무엇인가요?', [candidate])).resolves.toBe(false);
-    await expect(service.assess('면접 질문은 무엇인가요?', [candidate])).resolves.toBe(false);
+    await expect(service.assess('면접 질문은 무엇인가요?', [candidate])).resolves.toEqual(['chunk-1']);
+    await expect(service.assess('면접 질문은 무엇인가요?', [candidate])).resolves.toEqual([]);
+    await expect(service.assess('면접 질문은 무엇인가요?', [candidate])).resolves.toEqual([]);
     expect(request).toHaveBeenCalledTimes(3);
   });
 

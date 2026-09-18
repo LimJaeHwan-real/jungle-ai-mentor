@@ -5,6 +5,7 @@ import { ListFaqDto } from './dto/list-faq.dto';
 import { PublishFaqDto } from './dto/publish-faq.dto';
 import { AiQuestion } from './entities/ai-question.entity';
 import { Faq } from './entities/faq.entity';
+import type { RagSearchResult } from './rag.service';
 
 @Injectable()
 export class FaqService {
@@ -82,21 +83,41 @@ export class FaqService {
     return this.serialize(faq);
   }
 
-  async searchForAgent(keyword: string, limit = 3) {
-    const qb = this.faqs
-      .createQueryBuilder('faq')
-      .where('(faq.title ILIKE :keyword OR faq.question ILIKE :keyword OR faq.answer ILIKE :keyword)', {
-        keyword: `%${keyword}%`,
-      })
-      .orderBy('faq.viewCount', 'DESC')
-      .take(limit);
+  async searchForAgent(keyword: string, limit = 3): Promise<RagSearchResult[]> {
+    const terms = [...new Set(keyword.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/)
+      .filter((term) => term.length >= 2))].slice(0, 8);
+    if (terms.length === 0) return [];
 
-    const faqs = await qb.getMany();
-    return faqs.map((faq) => ({
-      title: faq.title,
-      content: `${faq.question}\n${faq.answer}`,
-      category: faq.category,
-    }));
+    const termClauses = terms.map((_, index) =>
+      `(faq.title ILIKE :faqTerm${index} OR faq.question ILIKE :faqTerm${index} OR faq.answer ILIKE :faqTerm${index})`);
+    const params = Object.fromEntries(terms.map((term, index) => [`faqTerm${index}`, `%${term}%`]));
+    const faqs = await this.faqs.createQueryBuilder('faq')
+      .innerJoinAndSelect('faq.aiQuestion', 'question')
+      .where(`question."agentState" ->> 'trustedInternalEvidence' = 'true'`)
+      .andWhere(`NOT (question."usedTools" ?| ARRAY['BLOG_SEARCH_TOOL', 'WEB_SEARCH_TOOL', 'GITHUB_MCP_TOOL']::text[])`)
+      .andWhere(`(${termClauses.join(' OR ')})`, params)
+      .orderBy('faq.viewCount', 'DESC')
+      .take(20)
+      .getMany();
+
+    return faqs
+      .filter((faq) => faq.aiQuestion?.agentState?.trustedInternalEvidence === true
+        && !faq.aiQuestion.usedTools?.some((tool) => ['BLOG_SEARCH_TOOL', 'WEB_SEARCH_TOOL', 'GITHUB_MCP_TOOL'].includes(tool)))
+      .map((faq) => {
+        const chunkText = `${faq.question}\n${faq.answer}`;
+        const searchable = `${faq.title} ${chunkText}`.toLowerCase();
+        return {
+          faqId: faq.id,
+          chunkId: `faq:${faq.id}`,
+          documentId: `faq:${faq.id}`,
+          title: faq.title,
+          chunkText,
+          category: 'FAQ',
+          score: terms.filter((term) => searchable.includes(term)).length / terms.length,
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
   }
 
   private toTitle(question: string) {

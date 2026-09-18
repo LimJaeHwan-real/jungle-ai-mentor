@@ -73,6 +73,7 @@ export interface AiAnswer {
 
 export interface AiReference {
   chunkId?: string;
+  faqId?: string;
   chunkingVersion?: string;
   embeddingVersion?: string;
   indexedAt?: string;
