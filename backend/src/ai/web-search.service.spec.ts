@@ -3,6 +3,7 @@ import { WebSearchService } from './web-search.service';
 const config = (key = 'test-placeholder') => ({
   get: (name: string) => name === 'OPENAI_API_KEY' ? key : undefined,
 });
+const metrics = { recordWebSearchResult: jest.fn() };
 
 const searchedResponse = (text: string, annotations: unknown[]) => ({
   ok: true,
@@ -16,6 +17,7 @@ const searchedResponse = (text: string, annotations: unknown[]) => ({
 } as Response);
 
 describe('WebSearchService 일회성 블로그 검색', () => {
+  beforeEach(() => metrics.recordWebSearchResult.mockClear());
   afterEach(() => jest.restoreAllMocks());
 
   it('검색을 강제로 한 번 실행하고 실제 인용된 출처만 반환한다', async () => {
@@ -23,7 +25,7 @@ describe('WebSearchService 일회성 블로그 검색', () => {
       { type: 'url_citation', start_index: 12, end_index: 15, url: 'https://example.tistory.com/123', title: '정글 후기' },
       { type: 'url_citation', start_index: 12, end_index: 15, url: 'https://example.com/other', title: '다른 자료' },
     ]));
-    const service = new WebSearchService(config() as never);
+    const service = new WebSearchService(config() as never, metrics as never);
 
     await expect(service.search('크래프톤 정글 생활은 어떤가요?')).resolves.toEqual({
       answer: '정글 후기가 있습니다. [1]',
@@ -42,32 +44,47 @@ describe('WebSearchService 일회성 블로그 검색', () => {
     expect(body.input).toContain('크래프톤 정글 생활은 어떤가요?');
     expect(body.input).toContain('크래프톤 정글');
     expect(request.mock.calls[0][1]?.signal).toBeDefined();
+    expect(metrics.recordWebSearchResult).toHaveBeenCalledWith('used', expect.any(Number));
   });
 
   it('블로그 인용이 없거나 검색 호출이 없으면 웹 답변을 채택하지 않는다', async () => {
     const request = jest.spyOn(global, 'fetch')
       .mockResolvedValueOnce(searchedResponse('출처 없는 답변입니다.', []))
       .mockResolvedValueOnce(searchedResponse('답변 [1]', [{ type: 'url_citation', start_index: 3, end_index: 6, url: 'https://example.com/post', title: '일반 사이트' }]));
-    const service = new WebSearchService(config() as never);
+    const service = new WebSearchService(config() as never, metrics as never);
 
     await expect(service.search('정글 후기')).resolves.toBeNull();
     await expect(service.search('정글 후기')).resolves.toBeNull();
     expect(request).toHaveBeenCalledTimes(2);
+    expect(metrics.recordWebSearchResult).toHaveBeenCalledTimes(2);
+    expect(metrics.recordWebSearchResult).toHaveBeenLastCalledWith('noCitedBlog', expect.any(Number));
   });
 
   it('API 오류에는 재시도하거나 임의의 답변을 만들지 않는다', async () => {
     const request = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: false, status: 500 } as Response);
-    const service = new WebSearchService(config() as never);
+    const service = new WebSearchService(config() as never, metrics as never);
 
     await expect(service.search('정글 후기')).rejects.toThrow('웹 검색');
     expect(request).toHaveBeenCalledTimes(1);
+    expect(metrics.recordWebSearchResult).toHaveBeenCalledWith('failed', expect.any(Number));
+  });
+
+  it('검색 도구를 실행하지 않은 불완전한 응답은 호출 실패로 기록한다', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'incomplete', output: [{ type: 'message', content: [{ type: 'output_text', text: '인용 없는 답변' }] }] }),
+    } as Response);
+    const service = new WebSearchService(config() as never, metrics as never);
+
+    await expect(service.search('정글 후기')).rejects.toThrow('웹 검색');
+    expect(metrics.recordWebSearchResult).toHaveBeenCalledWith('failed', expect.any(Number));
   });
 
   it('답변 앞 공백이 있어도 인용 위치를 원문 기준으로 유지한다', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue(searchedResponse('  후기 [1]', [
       { type: 'url_citation', start_index: 5, end_index: 8, url: 'https://example.tistory.com/1', title: '후기' },
     ]));
-    const service = new WebSearchService(config() as never);
+    const service = new WebSearchService(config() as never, metrics as never);
 
     await expect(service.search('정글 후기')).resolves.toMatchObject({
       answer: '  후기 [1]',
@@ -81,13 +98,14 @@ describe('WebSearchService 일회성 블로그 검색', () => {
       init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
     }));
     try {
-      const service = new WebSearchService(config() as never);
+      const service = new WebSearchService(config() as never, metrics as never);
       const pending = service.search('정글 후기');
       const failure = expect(pending).rejects.toThrow('웹 검색');
 
       await jest.advanceTimersByTimeAsync(20_000);
       await failure;
       expect(request).toHaveBeenCalledTimes(1);
+      expect(metrics.recordWebSearchResult).toHaveBeenCalledWith('failed', expect.any(Number));
     } finally {
       jest.useRealTimers();
     }
@@ -95,9 +113,10 @@ describe('WebSearchService 일회성 블로그 검색', () => {
 
   it('API 키가 없으면 외부 호출을 하지 않는다', async () => {
     const request = jest.spyOn(global, 'fetch');
-    const service = new WebSearchService(config('') as never);
+    const service = new WebSearchService(config('') as never, metrics as never);
 
     await expect(service.search('정글 후기')).rejects.toThrow('웹 검색');
     expect(request).not.toHaveBeenCalled();
+    expect(metrics.recordWebSearchResult).toHaveBeenCalledWith('failed', expect.any(Number));
   });
 });

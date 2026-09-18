@@ -40,18 +40,29 @@ export interface RagMetricsSnapshot {
     mode: string | null;
     dimension: number | null;
   };
+  webSearch: {
+    total: number;
+    used: number;
+    noCitedBlog: number;
+    failed: number;
+    totalDurationMs: number;
+    p95DurationMs: number | null;
+    recentDurationCount: number;
+  };
 }
 
 @Injectable()
 export class RagMetricsService {
   private static readonly durationWindow: number[] = [];
   private static readonly embeddingDurationWindow: number[] = [];
+  private static readonly webSearchDurationWindow: number[] = [];
   private static readonly durationWindowLimit = 200;
   private static snapshot: RagMetricsSnapshot = {
     searches: { total: 0, sufficientEvidence: 0, insufficientEvidence: 0, degraded: 0, noActiveIndex: 0, totalDurationMs: 0, p95DurationMs: null, recentDurationCount: 0 },
     retrieval: { fusionRuns: 0, rerankRuns: 0, vectorCandidates: 0, lexicalCandidates: 0, selectedResults: 0, vectorFailures: 0, lexicalFailures: 0 },
     indexing: { created: 0, updated: 0, skipped: 0, failed: 0 },
     embedding: { total: 0, succeeded: 0, failed: 0, retries: 0, totalDurationMs: 0, p95DurationMs: null, recentDurationCount: 0, provider: null, model: null, mode: null, dimension: null },
+    webSearch: { total: 0, used: 0, noCitedBlog: 0, failed: 0, totalDurationMs: 0, p95DurationMs: null, recentDurationCount: 0 },
   };
 
   recordSearch(status: RagRetrievalStatus, durationMs: number) {
@@ -108,6 +119,18 @@ export class RagMetricsService {
     const sorted = [...RagMetricsService.embeddingDurationWindow].sort((a, b) => a - b);
     embedding.recentDurationCount = sorted.length;
     embedding.p95DurationMs = sorted[Math.ceil(0.95 * sorted.length) - 1];
+  }
+
+  recordWebSearchResult(outcome: 'used' | 'noCitedBlog' | 'failed', durationMs: number) {
+    const webSearch = RagMetricsService.snapshot.webSearch;
+    webSearch.total += 1;
+    webSearch[outcome] += 1;
+    webSearch.totalDurationMs += durationMs;
+    RagMetricsService.webSearchDurationWindow.push(durationMs);
+    if (RagMetricsService.webSearchDurationWindow.length > RagMetricsService.durationWindowLimit) RagMetricsService.webSearchDurationWindow.shift();
+    const sorted = [...RagMetricsService.webSearchDurationWindow].sort((a, b) => a - b);
+    webSearch.recentDurationCount = sorted.length;
+    webSearch.p95DurationMs = sorted[Math.ceil(0.95 * sorted.length) - 1];
   }
 
   getSnapshot(): RagMetricsSnapshot {

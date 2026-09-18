@@ -1,5 +1,6 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { RagMetricsService } from './rag-metrics.service';
 
 export interface WebSearchReference {
   type: 'WEB_SEARCH';
@@ -31,15 +32,16 @@ interface ResponseOutput {
 
 @Injectable()
 export class WebSearchService {
-  constructor(private readonly config: ConfigService) {}
+  constructor(private readonly config: ConfigService, private readonly metrics: RagMetricsService) {}
 
   async search(question: string): Promise<WebSearchAnswer | null> {
-    const apiKey = this.config.get<string>('OPENAI_API_KEY')?.trim();
-    if (!apiKey) throw new ServiceUnavailableException('웹 검색 서비스를 사용할 수 없습니다.');
-
+    const startedAt = Date.now();
+    let outcome: 'used' | 'noCitedBlog' | 'failed' = 'failed';
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20_000);
     try {
+      const apiKey = this.config.get<string>('OPENAI_API_KEY')?.trim();
+      if (!apiKey) throw new Error('OpenAI API key missing');
       const response = await fetch('https://api.openai.com/v1/responses', {
         method: 'POST',
         headers: {
@@ -67,12 +69,15 @@ export class WebSearchService {
 
       const data = (await response.json()) as { status?: string; output?: ResponseOutput[] };
       if (data.status !== 'completed' || !data.output?.some((item) => item.type === 'web_search_call' && item.status === 'completed' && item.action?.type === 'search')) {
-        return null;
+        throw new Error('OpenAI web search did not complete');
       }
       const output = data.output.flatMap((item) => item.type === 'message' ? item.content ?? [] : [])
         .find((item) => item.type === 'output_text' && typeof item.text === 'string');
       const answer = output?.text;
-      if (!answer?.trim()) return null;
+      if (!answer?.trim()) {
+        outcome = 'noCitedBlog';
+        return null;
+      }
 
       const references = (output?.annotations ?? [])
         .filter((annotation) => annotation.type === 'url_citation')
@@ -92,12 +97,17 @@ export class WebSearchService {
           }];
         });
       const unique = [...new Map(references.map((reference) => [`${reference.sourceUrl}:${reference.startIndex}:${reference.endIndex}`, reference])).values()];
-      if (!unique.some((reference) => this.isBlog(reference.sourceUrl))) return null;
+      if (!unique.some((reference) => this.isBlog(reference.sourceUrl))) {
+        outcome = 'noCitedBlog';
+        return null;
+      }
+      outcome = 'used';
       return { answer, references: unique };
     } catch {
       throw new ServiceUnavailableException('웹 검색 서비스를 사용할 수 없습니다.');
     } finally {
       clearTimeout(timeout);
+      this.metrics.recordWebSearchResult(outcome, Date.now() - startedAt);
     }
   }
 
