@@ -54,7 +54,7 @@ export class WebSearchService {
           tool_choice: 'required',
           reasoning: { effort: 'low' },
           store: false,
-          max_output_tokens: 700,
+          max_output_tokens: 2000,
           input: [
             '다음 질문에 답하기 위해 웹에서 반드시 검색하세요.',
             '검색어에는 "크래프톤 정글"과 사용자 질문을 포함하고, 관련 한국어 블로그 후기·회고를 우선 찾으세요.',

@@ -41,6 +41,7 @@ describe('WebSearchService 일회성 블로그 검색', () => {
     expect(body.tools).toEqual([{ type: 'web_search', search_context_size: 'medium' }]);
     expect(body.tool_choice).toBe('required');
     expect(body.store).toBe(false);
+    expect(body.max_output_tokens).toBe(2000);
     expect(body.input).toContain('크래프톤 정글 생활은 어떤가요?');
     expect(body.input).toContain('크래프톤 정글');
     expect(request.mock.calls[0][1]?.signal).toBeDefined();
