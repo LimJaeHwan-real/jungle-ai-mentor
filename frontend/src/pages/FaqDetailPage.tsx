@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
 import { api } from '../api';
 import { Loading } from '../components/Loading';
+import { AnswerMarkdown } from '../components/AnswerMarkdown';
 import { Faq } from '../types';
 
 export function FaqDetailPage() {
@@ -20,7 +21,7 @@ export function FaqDetailPage() {
       <span className="route-badge">{query.data.category}</span>
       <h2>{query.data.title}</h2>
       <div className="question-box">{query.data.question}</div>
-      <pre className="answer-box">{query.data.answer}</pre>
+      <AnswerMarkdown answer={query.data.answer} />
       <p className="muted-line">조회 {query.data.viewCount} · 좋아요 {query.data.likeCount}</p>
     </article>
   );

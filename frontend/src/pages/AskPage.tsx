@@ -1,36 +1,9 @@
-import { FormEvent, ReactNode, useState } from 'react';
+import { FormEvent, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Bot, ExternalLink, Search, Send, UploadCloud } from 'lucide-react';
 import { api, getErrorMessage } from '../api';
 import { AiAnswer, Faq } from '../types';
-
-function answerWithCitations(result: AiAnswer): ReactNode {
-  if (result.externalAugmentationStatus !== 'EVIDENCE_USED') return result.answer;
-  const grouped = new Map<string, { start: number; end: number; links: Array<{ index: number; title: string; url: string }> }>();
-  result.references.forEach((reference, index) => {
-    const { startIndex: start, endIndex: end, sourceUrl: url } = reference;
-    if (typeof start !== 'number' || typeof end !== 'number' || !url || start < 0 || end <= start || end > result.answer.length) return;
-    const key = `${start}:${end}`;
-    const group = grouped.get(key) ?? { start, end, links: [] };
-    group.links.push({ index, title: reference.title ?? '출처', url });
-    grouped.set(key, group);
-  });
-
-  const nodes: ReactNode[] = [];
-  let cursor = 0;
-  for (const group of [...grouped.values()].sort((a, b) => a.start - b.start || a.end - b.end)) {
-    if (group.start < cursor) continue;
-    nodes.push(result.answer.slice(cursor, group.start));
-    group.links.forEach((link, linkIndex) => nodes.push(
-      <a href={link.url} target="_blank" rel="noopener noreferrer" title={link.title} key={`${group.start}-${link.index}`}>
-        {linkIndex === 0 ? result.answer.slice(group.start, group.end) : ` [${link.index + 1}]`}
-      </a>,
-    ));
-    cursor = group.end;
-  }
-  nodes.push(result.answer.slice(cursor));
-  return nodes;
-}
+import { AnswerMarkdown } from '../components/AnswerMarkdown';
 
 export function AskPage() {
   const [question, setQuestion] = useState('');
@@ -113,7 +86,7 @@ export function AskPage() {
                 </span>
               ))}
             </div>
-            <pre className="answer-box">{answerWithCitations(answer)}</pre>
+            <AnswerMarkdown answer={answer.answer} references={answer.externalAugmentationStatus === 'EVIDENCE_USED' ? answer.references : []} />
             <section className="reference-section">
               <div className="section-heading compact">
                 <h3>참고 근거</h3>

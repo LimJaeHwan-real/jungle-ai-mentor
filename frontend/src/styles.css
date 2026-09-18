@@ -673,6 +673,51 @@ select:focus {
   text-decoration: underline;
 }
 
+.answer-box {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.answer-box > :first-child {
+  margin-top: 0;
+}
+
+.answer-box > :last-child {
+  margin-bottom: 0;
+}
+
+.answer-box pre {
+  overflow-x: auto;
+  white-space: pre;
+  padding: 12px;
+  border-radius: 10px;
+  background: #e9eef5;
+}
+
+.answer-box :not(pre) > code {
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: #e9eef5;
+}
+
+.answer-box table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.answer-box th,
+.answer-box td {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+}
+
+.answer-box ul,
+.answer-box ol {
+  padding-left: 1.5rem;
+}
+
 .detail-view {
   display: grid;
   gap: 14px;
