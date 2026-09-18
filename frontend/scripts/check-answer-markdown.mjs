@@ -13,6 +13,7 @@ const server = await createServer({
 
 try {
   const { AnswerMarkdown } = await server.ssrLoadModule('/src/components/AnswerMarkdown.tsx');
+  const { answerStatusLabel } = await server.ssrLoadModule('/src/utils/answer-status.ts');
   const render = (answer, references) => renderToStaticMarkup(
     React.createElement(AnswerMarkdown, { answer, references }),
   );
@@ -47,6 +48,15 @@ try {
     const html = render('![그림](https://example.org/track.png) <script>alert(1)</script> [링크](javascript:alert(1))');
     assert.doesNotMatch(html, /<img|<script|href="javascript:/);
     assert.match(html, /그림/);
+  });
+
+  await test('근거 없음과 검색 장애를 서로 다른 답변 상태로 표시한다', () => {
+    assert.equal(answerStatusLabel('NO_EVIDENCE'), '답할 근거 없음');
+    assert.equal(answerStatusLabel('WEB_SEARCH_FAILED'), '웹 검색 실패');
+    assert.equal(answerStatusLabel('NO_ACTIVE_INDEX'), '활성 색인 없음');
+    assert.equal(answerStatusLabel('INTERNAL_SEARCH_FAILED'), '내부 검색 장애');
+    assert.equal(answerStatusLabel('INTERNAL_EVIDENCE'), '내부 근거 답변');
+    assert.equal(answerStatusLabel('WEB_EVIDENCE'), '웹 근거 답변');
   });
 } finally {
   await server.close();

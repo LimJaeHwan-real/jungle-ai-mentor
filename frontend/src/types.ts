@@ -64,6 +64,7 @@ export interface AiAnswer {
   usedTools: string[];
   agentRoute: string;
   agentState: Record<string, unknown>;
+  answerStatus?: 'GITHUB_URL_REQUIRED' | 'GITHUB_ANALYSIS' | 'WEB_EVIDENCE' | 'INTERNAL_SEARCH_FAILED' | 'NO_ACTIVE_INDEX' | 'WEB_SEARCH_FAILED' | 'NO_EVIDENCE' | 'ANSWER_CITATION_FAILED' | 'INTERNAL_EVIDENCE';
   retrievalStatus?: 'SUFFICIENT_EVIDENCE' | 'INSUFFICIENT_EVIDENCE' | 'NO_ACTIVE_INDEX' | 'SEARCH_DEGRADED';
   externalAugmentationStatus?: 'NOT_REQUESTED' | 'SEARCHED_NOT_USED' | 'EVIDENCE_USED' | 'FAILED';
   references: AiReference[];

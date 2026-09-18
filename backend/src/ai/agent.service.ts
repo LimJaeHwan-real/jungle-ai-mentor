@@ -34,13 +34,14 @@ export class AgentService {
     const usedTools: string[] = [];
     let answer = '';
     let references: unknown[] = [];
-    let containsExternalMaterial = false;
+    let shouldPersist = false;
+    let answerStatus = '';
 
     if (route === AgentRoute.GITHUB_REPO) {
-      containsExternalMaterial = true;
       const repositoryUrl = extractGithubRepositoryUrls(`${dto.repositoryUrl ?? ''} ${dto.question}`, 1)[0];
       if (!repositoryUrl) {
         state.githubUrlRequired = true;
+        answerStatus = 'GITHUB_URL_REQUIRED';
         answer = '분석할 GitHub 저장소 URL을 알려주세요. 예: https://github.com/owner/repo';
       } else {
         usedTools.push('GITHUB_MCP_TOOL');
@@ -53,6 +54,7 @@ export class AgentService {
           category: 'GITHUB_REPOSITORY',
           sourceUrl: analysis.repositoryUrl,
         }], '제공된 GitHub 분석 결과만 사용하고, 확인되지 않은 내용은 단정하지 마세요.');
+        answerStatus = 'GITHUB_ANALYSIS';
       }
     } else {
       usedTools.push('FAQ_SEARCH_TOOL');
@@ -65,16 +67,7 @@ export class AgentService {
       }
       const intent = classifySearchIntent(dto.question);
       state.searchIntent = intent;
-      let earlyWebResult: Promise<Awaited<ReturnType<WebSearchService['search']>> | undefined> | undefined;
-      if (retrieval === undefined && intent === 'RECENT_REVIEW') {
-        usedTools.push('RAG_SEARCH_TOOL');
-        const candidates = await this.rag.searchCandidatesWithStatus(dto.question);
-        if (candidates.status === 'CANDIDATES_FOUND' || candidates.status === 'INSUFFICIENT_EVIDENCE') {
-          usedTools.push('WEB_SEARCH_TOOL');
-          earlyWebResult = this.webSearch.search(dto.question, intent).catch(() => undefined);
-        }
-        retrieval = await this.rag.assessCandidates(dto.question, candidates, faqCandidates);
-      } else if (retrieval === undefined) {
+      if (retrieval === undefined) {
         usedTools.push('RAG_SEARCH_TOOL');
         retrieval = await this.rag.searchWithStatus(dto.question, 4, faqCandidates);
       }
@@ -85,10 +78,9 @@ export class AgentService {
         topScore: results[0]?.score,
         status: retrieval.status,
       };
-      if (retrieval.status === 'INSUFFICIENT_EVIDENCE'
-        || (intent === 'RECENT_REVIEW' && retrieval.status === 'SUFFICIENT_EVIDENCE')) {
-        if (!earlyWebResult) usedTools.push('WEB_SEARCH_TOOL');
-        const webResult = await (earlyWebResult ?? this.webSearch.search(dto.question, intent).catch(() => undefined));
+      if (retrieval.status === 'INSUFFICIENT_EVIDENCE') {
+        usedTools.push('WEB_SEARCH_TOOL');
+        const webResult = await this.webSearch.search(dto.question, intent).catch(() => undefined);
         if (webResult === undefined) {
           externalAugmentationStatus = 'FAILED';
           state.webSearch = { reason: 'external_search_failed' };
@@ -100,20 +92,15 @@ export class AgentService {
           state.webSearch = { resultCount: webResult.references.length };
           answer = webResult.answer;
           references = webResult.references;
-          containsExternalMaterial = true;
+          answerStatus = 'WEB_EVIDENCE';
         }
-      }
-
-      if (retrieval.status === 'SEARCH_DEGRADED' && earlyWebResult) {
-        const unusedWebResult = await earlyWebResult;
-        externalAugmentationStatus = unusedWebResult === undefined ? 'FAILED' : 'SEARCHED_NOT_USED';
-        state.webSearch = { reason: 'internal_evidence_assessment_failed' };
       }
 
       state.externalAugmentationStatus = externalAugmentationStatus;
       state.retrievalStatus = retrieval.status;
       if (retrieval.status === 'SEARCH_DEGRADED' || retrieval.status === 'NO_ACTIVE_INDEX') {
         references = [];
+        answerStatus = retrieval.status === 'SEARCH_DEGRADED' ? 'INTERNAL_SEARCH_FAILED' : 'NO_ACTIVE_INDEX';
         state.ragUnavailable = {
           resultCount: results.length,
           status: retrieval.status,
@@ -124,11 +111,10 @@ export class AgentService {
           : '현재 질문에 사용할 활성 지식 색인이 없습니다. 운영자가 문서를 색인하거나 재색인한 뒤 다시 시도해 주세요.';
       } else if (retrieval.status === 'INSUFFICIENT_EVIDENCE' && externalAugmentationStatus !== 'EVIDENCE_USED') {
         references = [];
+        answerStatus = externalAugmentationStatus === 'FAILED' ? 'WEB_SEARCH_FAILED' : 'NO_EVIDENCE';
         answer = externalAugmentationStatus === 'FAILED'
           ? '웹 검색에 실패했고 등록된 근거에서도 충분한 내용을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.'
-          : externalAugmentationStatus === 'SEARCHED_NOT_USED'
-            ? '등록된 근거가 부족하고 인용할 수 있는 웹 자료도 찾지 못했습니다. 질문을 더 구체적으로 해 주세요.'
-            : '등록된 근거에서 질문에 답할 만큼 충분한 내용을 확인하지 못했습니다. 질문을 더 구체적으로 하거나 자료가 추가된 뒤 다시 시도해 주세요.';
+          : '현재 연결된 내부 자료와 웹 검색에서 질문에 답할 만한 근거를 찾지 못했습니다. 질문을 더 구체적으로 적거나 참고할 링크를 알려주세요.';
       } else if (retrieval.status === 'SUFFICIENT_EVIDENCE' && externalAugmentationStatus !== 'EVIDENCE_USED') {
         references = results;
         answer = await this.llm.answer(
@@ -148,16 +134,20 @@ export class AgentService {
         const citedNumbers = [...answer.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1]));
         if (citedNumbers.length === 0 || citedNumbers.some((number) => number < 1 || number > references.length)) {
           state.answerCitationStatus = 'MISSING_OR_INVALID';
+          answerStatus = 'ANSWER_CITATION_FAILED';
           answer = '근거 번호를 확인할 수 있는 답변을 만들지 못했습니다. 잠시 후 다시 질문해 주세요.';
         } else {
           state.answerCitationStatus = 'CITATION_IDS_VALID';
           state.trustedInternalEvidence = true;
+          answerStatus = 'INTERNAL_EVIDENCE';
+          shouldPersist = true;
         }
       }
     }
 
+    state.answerStatus = answerStatus;
     const completedState: Record<string, unknown> = { ...state, finishedAt: new Date().toISOString() };
-    if (containsExternalMaterial) {
+    if (!shouldPersist) {
       return {
         id: null,
         question: dto.question,
@@ -167,6 +157,7 @@ export class AgentService {
         agentState: completedState,
         retrievalStatus: completedState.retrievalStatus,
         externalAugmentationStatus: completedState.externalAugmentationStatus,
+        answerStatus,
         references,
         isPublic: false,
         createdAt: new Date(),
@@ -193,6 +184,7 @@ export class AgentService {
       agentState: question.agentState,
       retrievalStatus: question.agentState.retrievalStatus,
       externalAugmentationStatus: question.agentState.externalAugmentationStatus,
+      answerStatus,
       references,
       isPublic: question.isPublic,
       createdAt: question.createdAt,

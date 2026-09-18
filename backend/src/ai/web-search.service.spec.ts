@@ -91,6 +91,19 @@ describe('WebSearchService 일회성 블로그 검색', () => {
     expect(metrics.recordWebSearchResult).toHaveBeenLastCalledWith('noCitedSource', expect.any(Number));
   });
 
+  it('검색이 정상 완료돼도 답할 근거가 없다는 결과는 인용 링크가 있어도 채택하지 않는다', async () => {
+    const answer = 'NO_SUPPORTED_ANSWER';
+    const request = jest.spyOn(global, 'fetch').mockResolvedValue(searchedResponse(answer, [
+      { type: 'url_citation', start_index: 0, end_index: answer.length, url: 'https://example.org/post', title: '관련 없는 글' },
+    ]));
+    const service = new WebSearchService(config() as never, metrics as never);
+
+    await expect(service.search('다음 기수 공식 마감일은?', 'OFFICIAL_FACT')).resolves.toBeNull();
+    const body = JSON.parse(String(request.mock.calls[0][1]?.body));
+    expect(body.input).toContain('NO_SUPPORTED_ANSWER');
+    expect(metrics.recordWebSearchResult).toHaveBeenCalledWith('noCitedSource', expect.any(Number));
+  });
+
   it('API 오류에는 재시도하거나 임의의 답변을 만들지 않는다', async () => {
     const request = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: false, status: 500 } as Response);
     const service = new WebSearchService(config() as never, metrics as never);

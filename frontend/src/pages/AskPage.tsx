@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { api, getErrorMessage } from '../api';
 import { AiAnswer, Faq } from '../types';
 import { AnswerMarkdown, publicUrl } from '../components/AnswerMarkdown';
+import { answerStatusLabel } from '../utils/answer-status';
 
 export function AskPage() {
   const [question, setQuestion] = useState('');
@@ -73,6 +74,7 @@ export function AskPage() {
           <>
             <div className="tool-row">
               <span className="route-badge">{answer.agentRoute}</span>
+              {answer.answerStatus && <span className="tag-pill">답변 상태: {answerStatusLabel(answer.answerStatus)}</span>}
               {answer.retrievalStatus && <span className="tag-pill">검색 상태: {answer.retrievalStatus}</span>}
               {answer.externalAugmentationStatus && answer.externalAugmentationStatus !== 'NOT_REQUESTED' && (
                 <span className="tag-pill">외부 보강: {{
@@ -135,7 +137,7 @@ export function AskPage() {
               <button className="secondary-button" type="button" disabled={publishMutation.isPending} onClick={() => publishMutation.mutate()}>
                 <UploadCloud size={17} /> FAQ로 공개
               </button>
-            ) : <p className="muted-line">외부 자료를 참고한 답변은 저장하거나 FAQ로 공개하지 않습니다.</p>}
+            ) : <p className="muted-line">이 답변은 저장되지 않아 FAQ로 공개할 수 없습니다.</p>}
             {publishMutation.error && <p className="error-text">{getErrorMessage(publishMutation.error)}</p>}
             {publishMessage && <p className="success-text">{publishMessage}</p>}
           </>
