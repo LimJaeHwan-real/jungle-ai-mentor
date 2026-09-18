@@ -225,6 +225,7 @@ describe('RagService 안전한 강제 재색인', () => {
     };
     const builder = {
       where: jest.fn((brackets: { whereFactory: (query: typeof innerQuery) => void }) => { brackets.whereFactory(innerQuery); return builder; }),
+      andWhere: jest.fn(() => builder),
       orderBy: jest.fn(() => builder),
     };
     const service = Object.create(RagService.prototype) as any;
@@ -239,5 +240,32 @@ describe('RagService 안전한 강제 재색인', () => {
       expect.stringContaining('c."embeddingModel" IS DISTINCT FROM :model'),
       expect.stringContaining('c."chunkingVersion" IS DISTINCT FROM :chunkingVersion'),
     ]));
+    expect(builder.andWhere).toHaveBeenCalledWith('document."sourceType" != :excludedSourceType', { excludedSourceType: 'BLOG_SEARCH' });
+  });
+
+  it('블로그 수집 문서는 새 색인을 시작하지 않는다', async () => {
+    const service = Object.create(RagService.prototype) as any;
+    const embed = jest.fn();
+    const save = jest.fn();
+    Object.assign(service, {
+      documents: { findOne: jest.fn(), save },
+      embeddings: { embed },
+    });
+
+    await expect(service.indexDocument({ ...dto, sourceType: 'BLOG_SEARCH' })).rejects.toThrow('외부 블로그');
+    expect(embed).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('이전에 저장된 블로그 문서는 재색인하지 않는다', async () => {
+    const service = Object.create(RagService.prototype) as any;
+    const embed = jest.fn();
+    Object.assign(service, {
+      documents: { findOne: jest.fn(async () => ({ id: 'blog-1', ...dto, sourceType: 'BLOG_SEARCH' })) },
+      embeddings: { embed },
+    });
+
+    await expect(service.reindexDocument('blog-1')).rejects.toThrow('외부 블로그');
+    expect(embed).not.toHaveBeenCalled();
   });
 });

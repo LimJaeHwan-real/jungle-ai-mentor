@@ -92,10 +92,12 @@ export class RagService {
   }
 
   async indexDocument(dto: CreateDocumentDto, options: { force?: boolean; documentId?: string } = {}): Promise<RagIndexResult> {
+    if (dto.sourceType === 'BLOG_SEARCH') throw new BadRequestException('외부 블로그 자료는 색인할 수 없습니다.');
     const contentHash = createHash('sha256').update(dto.content).digest('hex');
     const existing = options.documentId
       ? await this.documents.findOne({ where: { id: options.documentId } })
       : dto.sourceUrl ? await this.documents.findOne({ where: { sourceUrl: dto.sourceUrl } }) : undefined;
+    if (existing?.sourceType === 'BLOG_SEARCH') throw new BadRequestException('외부 블로그 자료는 색인할 수 없습니다.');
     if (options.documentId && !existing) throw new NotFoundException('재색인 대상 문서를 찾을 수 없습니다.');
     const metadata = this.embeddings.getMetadata();
 
@@ -195,6 +197,7 @@ export class RagService {
   async reindexDocument(documentId: string): Promise<RagIndexResult> {
     const document = await this.documents.findOne({ where: { id: documentId } });
     if (!document) throw new NotFoundException('재색인 대상 문서를 찾을 수 없습니다.');
+    if (document.sourceType === 'BLOG_SEARCH') throw new BadRequestException('외부 블로그 자료는 재색인할 수 없습니다.');
     return this.indexDocument(
       {
         title: document.title,
@@ -239,6 +242,7 @@ export class RagService {
         INNER JOIN documents d ON d.id = c."documentId"
         WHERE c.embedding IS NOT NULL
           AND d."indexStatus" = 'ACTIVE'
+          AND d."sourceType" != 'BLOG_SEARCH'
           AND d."embeddingModel" = $3
           AND d."embeddingMode" = $4
           AND d."embeddingVersion" = $5
@@ -310,6 +314,7 @@ export class RagService {
         CROSS JOIN query
         WHERE c.embedding IS NOT NULL
           AND d."indexStatus" = 'ACTIVE'
+          AND d."sourceType" != 'BLOG_SEARCH'
           AND (d."embeddingProvider" = $4 OR ($4 = 'openai' AND $6 = 'real' AND d."embeddingProvider" IS NULL))
           AND d."embeddingModel" = $5
           AND d."embeddingMode" = $6
@@ -340,6 +345,7 @@ export class RagService {
         CROSS JOIN query
         WHERE c.embedding IS NOT NULL
           AND d."indexStatus" = 'ACTIVE'
+          AND d."sourceType" != 'BLOG_SEARCH'
           AND (d."embeddingProvider" = $4 OR ($4 = 'openai' AND $6 = 'real' AND d."embeddingProvider" IS NULL))
           AND d."embeddingModel" = $5
           AND d."embeddingMode" = $6
@@ -424,6 +430,7 @@ export class RagService {
         INNER JOIN documents d ON d.id = c."documentId"
         WHERE c.embedding IS NOT NULL
           AND d."indexStatus" = 'ACTIVE'
+          AND d."sourceType" != 'BLOG_SEARCH'
           AND d."embeddingModel" = $2
           AND d."embeddingMode" = $3
           AND d."embeddingVersion" = $4
@@ -505,6 +512,7 @@ export class RagService {
             )`);
         }),
       )
+      .andWhere('document."sourceType" != :excludedSourceType', { excludedSourceType: 'BLOG_SEARCH' })
       .orderBy('document.updatedAt', 'DESC');
   }
 

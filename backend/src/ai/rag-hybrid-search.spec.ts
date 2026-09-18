@@ -26,6 +26,7 @@ describe('RagService RRF 후보 결합', () => {
     expect(chunks.query.mock.calls[0][0]).toContain('c."indexStatus" = \'ACTIVE\'');
     expect(chunks.query.mock.calls[0][0]).toContain('c."embeddingProvider" IS NULL');
     const sql = chunks.query.mock.calls[0][0] as string;
+    expect(sql).toContain('d."sourceType" != \'BLOG_SEARCH\'');
     expect(sql.match(/c\."embeddingModel" = \$5/g)).toHaveLength(2);
     expect(sql.match(/c\.embedding IS NOT NULL/g)).toHaveLength(2);
   });
@@ -103,6 +104,9 @@ describe('RagService RRF 후보 결합', () => {
     await expect(service.searchWithStatus('정글', 4)).resolves.toMatchObject({ status: 'NO_ACTIVE_INDEX' });
     expect(chunks.query.mock.calls[2][0]).toContain('c."embeddingModel" = $2');
     expect(service.documents.count).not.toHaveBeenCalled();
+    for (const [sql] of chunks.query.mock.calls) {
+      expect(sql).toContain('d."sourceType" != \'BLOG_SEARCH\'');
+    }
   });
 
   it('벡터와 키워드 후보에 모두 있는 chunk를 우선한다', () => {
