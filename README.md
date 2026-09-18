@@ -15,7 +15,7 @@ React, NestJS, PostgreSQL, pgvector 기반의 AI 학습 커뮤니티 게시판 M
 - FAQ 목록/상세, 키워드/카테고리 검색, 조회수 증가
 - GitHub 저장소 소개·README 분석 adapter와 mock/fallback 모드
 - AgentService 기반 질문 분류와 tool routing
-- 사용자가 직접 켜는 일회성 크래프톤 정글 블로그 웹 검색과 인용 링크 표시
+- 질문 성격에 맞춘 일회성 웹 검색과 인용 링크 표시
 - 외부 API 연결 없이도 데모 가능한 mock LLM, mock embedding, mock MCP
 
 ## 아키텍처
@@ -26,7 +26,7 @@ flowchart LR
   UI --> Agent[AgentService]
   Agent --> RAG[내부 RAG 검색]
   RAG --> DB[(내부 문서와 임베딩 DB)]
-  Agent -->|직접 허용했고 근거 부족| Web[OpenAI web_search]
+  Agent -->|근거 부족 또는 최근 후기 확인| Web[OpenAI web_search]
   Agent -->|GitHub 저장소 분석| GitHub[GitHub 소개와 README]
   Web -->|인용 링크와 일회성 답변| UI
   GitHub -->|일회성 분석 답변| UI
@@ -44,6 +44,8 @@ flowchart LR
 6. 검색 시 pgvector와 PostgreSQL 전문 검색 후보를 결합합니다. 검색 장애 상태에서는 신뢰할 수 있는 RAG 답변을 생성하지 않습니다.
 7. `/api/ai/ask`는 AgentService를 거쳐 `RAG_SEARCH_TOOL`을 선택할 수 있습니다.
 
+실제 임베딩 환경에서는 검색 후보와 질문을 모델로 비교해 근거 충분성을 확인합니다. API 키가 없는 명시적 로컬 mock 데모에서는 후보 기반 mock 답변만 표시하며 품질 판정 결과로 사용하지 않습니다.
+
 ## MCP 구조
 - API: `POST /api/mcp/github/analyze`
 - Mock 모드는 외부 연결 없이 데모 분석을 반환합니다.
@@ -51,17 +53,17 @@ flowchart LR
 - MCP stdio 모드는 인터페이스 준비 상태이며 현재 MVP에서는 mock fallback을 반환합니다.
 - 외부 API 호출이 실패해도 전체 요청은 실패하지 않고 fallback 응답을 반환합니다.
 
-## 일회성 블로그 웹 검색
-질문 화면의 검색 옵션은 기본적으로 꺼져 있습니다. 사용자가 직접 켜고 내부 자료가 부족할 때만 OpenAI Responses API의 `web_search`를 한 번 실행합니다.
+## 일회성 웹 검색
+`GENERAL` 질문은 내부 게시글을 먼저 검색합니다. 최근 후기는 정상적인 내부 검색 후보가 나온 직후 웹 검색과 내부 근거 판정을 겹쳐 실행하고, 다른 질문은 내부 근거가 부족할 때 OpenAI Responses API의 `web_search`를 한 번 실행합니다. 내부 검색 장애나 활성 색인 없음은 외부 검색으로 감추지 않습니다.
 
 ```text
-사용자 질문 + 직접 켠 검색 옵션
-→ 내부 자료 검색과 충분성 판정
-→ 부족하면 “크래프톤 정글”과 질문으로 웹 검색
-→ 인용된 블로그가 있으면 그 답변과 출처 링크를 화면에 표시
+사용자 질문 → 내부 게시글 검색 → 질문의 대상·주제·시점에 대한 근거 판정
+→ 일반 질문: 근거가 부족하면 질문에서 검색어를 만들어 웹 검색
+→ 최근 후기: 내부 검색이 정상이면 웹 후기 검색과 근거 판정을 겹쳐 실행
+→ 실제 인용된 출처가 있으면 답변과 링크를 화면에 표시
 ```
 
-검색은 요청당 20초 제한이며 자동 재시도하지 않습니다. 인용할 블로그가 없거나 호출에 실패하면 근거 부족 안내를 표시합니다. 요청에는 `store: false`를 설정해 OpenAI API 응답의 사후 조회용 저장을 끕니다. 이 설정이 외부 서비스의 모든 보존 정책을 바꾸는 것은 아닙니다.
+웹 검색은 요청당 20초 제한이며 자동 재시도하지 않습니다. 후기 질문에서는 인용된 블로그를 요구하고, 공식 일정·규정 질문에서는 공식 원문을 우선 찾도록 요청합니다. 해당 사이트가 실제 공식 사이트인지는 URL 인용만으로 확정할 수 없습니다. 채택할 인용 출처가 없거나 호출에 실패하면 근거 부족 안내를 표시합니다. 요청에는 `store: false`를 설정해 OpenAI API 응답의 사후 조회용 저장을 끕니다. 이 설정이 외부 서비스의 모든 보존 정책을 바꾸는 것은 아닙니다.
 
 블로그 글·GitHub 자료의 본문과 임베딩은 DB에 저장하지 않습니다. 외부 자료를 사용한 답변도 질문 기록과 FAQ에 저장하지 않으며, 화면에 표시된 답변과 실제 인용 링크는 화면을 벗어나면 보존하지 않습니다. 이전에 수집된 `BLOG_SEARCH` 문서는 검색·재색인에서 제외합니다. 기존 DB 행의 삭제는 별도 대상 확인 후 결정합니다.
 
@@ -71,10 +73,11 @@ flowchart LR
 `/api/ai/ask` 요청은 반드시 `AgentService`를 거칩니다.
 
 라우트:
-- `JUNGLE_KNOWLEDGE`: 정글/학습/입학/상담 질문, `RAG_SEARCH_TOOL`
+- `GENERAL`: 정글/학습/입학/상담과 다른 일반 질문 모두 내부 `RAG_SEARCH_TOOL`을 먼저 사용하고, 질문 성격에 따라 웹 검색을 보강
 - `FAQ_SEARCH`: FAQ 관련 질문, `FAQ_SEARCH_TOOL`
 - `GITHUB_REPO`: repository URL 또는 GitHub 질문, `GITHUB_MCP_TOOL`
-- `GENERAL`: 일반 질문, `GENERAL_LLM_TOOL`
+
+이전 질문 기록의 `JUNGLE_KNOWLEDGE` 값은 보존합니다. 새 질문은 이 값을 사용하지 않습니다.
 
 응답에는 `agentRoute`, `usedTools`, `agentState`, `references`가 포함됩니다.
 
