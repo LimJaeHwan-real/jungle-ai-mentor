@@ -4,7 +4,12 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 
-const server = await createServer({ server: { middlewareMode: true }, appType: 'custom' });
+const server = await createServer({
+  server: { middlewareMode: true },
+  appType: 'custom',
+  // The short-lived test server does not need to scan index.html in the background.
+  optimizeDeps: { noDiscovery: true },
+});
 
 try {
   const { AnswerMarkdown } = await server.ssrLoadModule('/src/components/AnswerMarkdown.tsx');
