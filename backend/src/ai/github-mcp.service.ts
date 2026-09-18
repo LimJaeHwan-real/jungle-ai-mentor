@@ -8,7 +8,6 @@ export interface GithubAnalysisResult {
   repo?: string;
   summary: string;
   readmePreview?: string;
-  fileHints: string[];
   fallback: boolean;
 }
 
@@ -51,10 +50,9 @@ export class GithubMcpService {
     }
 
     try {
-      const [repoResponse, readmeResponse, contentsResponse] = await Promise.all([
+      const [repoResponse, readmeResponse] = await Promise.all([
         fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers }),
         fetch(`https://api.github.com/repos/${owner}/${repo}/readme`, { headers }),
-        fetch(`https://api.github.com/repos/${owner}/${repo}/contents`, { headers }),
       ]);
 
       if (!repoResponse.ok) {
@@ -65,10 +63,6 @@ export class GithubMcpService {
       const readmeData = readmeResponse.ok
         ? ((await readmeResponse.json()) as { content?: string; encoding?: string })
         : undefined;
-      const contentsData = contentsResponse.ok
-        ? ((await contentsResponse.json()) as Array<{ name: string; type: string }>)
-        : [];
-
       const readmePreview =
         readmeData?.content && readmeData.encoding === 'base64'
           ? Buffer.from(readmeData.content, 'base64').toString('utf8').slice(0, 1200)
@@ -87,7 +81,6 @@ export class GithubMcpService {
           .filter(Boolean)
           .join(' / '),
         readmePreview,
-        fileHints: contentsData.slice(0, 12).map((item) => `${item.type}:${item.name}`),
         fallback: false,
       };
     } catch {
@@ -102,9 +95,7 @@ export class GithubMcpService {
       owner,
       repo,
       summary: reason,
-      readmePreview:
-        'Mock README: 이 저장소는 README, src 디렉터리, 테스트 파일을 기준으로 구조를 분석하는 데모 응답을 제공합니다.',
-      fileHints: ['dir:src', 'file:README.md', 'file:package.json', 'dir:test'],
+      readmePreview: 'Mock README: GitHub 저장소 소개와 README를 보여주는 데모 응답입니다.',
       fallback: true,
     };
   }
@@ -121,4 +112,3 @@ export class GithubMcpService {
     }
   }
 }
-

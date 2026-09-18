@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ListFaqDto } from './dto/list-faq.dto';
@@ -17,6 +17,9 @@ export class FaqService {
     const question = await this.questions.findOne({ where: { id: questionId } });
     if (!question) {
       throw new NotFoundException('AI question not found.');
+    }
+    if (question.usedTools?.some((tool) => ['BLOG_SEARCH_TOOL', 'WEB_SEARCH_TOOL', 'GITHUB_MCP_TOOL'].includes(tool))) {
+      throw new ForbiddenException('외부 자료를 사용한 답변은 FAQ로 공개할 수 없습니다.');
     }
 
     const existing = await this.faqs.findOne({ where: { aiQuestionId: questionId } });
@@ -114,4 +117,3 @@ export class FaqService {
     };
   }
 }
-

@@ -58,14 +58,14 @@ export interface Faq {
 }
 
 export interface AiAnswer {
-  id: string;
+  id: string | null;
   question: string;
   answer: string;
   usedTools: string[];
   agentRoute: string;
   agentState: Record<string, unknown>;
   retrievalStatus?: 'SUFFICIENT_EVIDENCE' | 'INSUFFICIENT_EVIDENCE' | 'NO_ACTIVE_INDEX' | 'SEARCH_DEGRADED';
-  externalAugmentationStatus?: 'NOT_REQUESTED' | 'SEARCHED_NOT_USED' | 'EVIDENCE_USED' | 'FAILED' | 'DISABLED';
+  externalAugmentationStatus?: 'NOT_REQUESTED' | 'SEARCHED_NOT_USED' | 'EVIDENCE_USED' | 'FAILED';
   references: AiReference[];
   isPublic: boolean;
   createdAt: string;
@@ -79,9 +79,8 @@ export interface AiReference {
   type?: string;
   title?: string;
   sourceUrl?: string;
-  snippet?: string;
-  imported?: boolean;
-  reason?: string;
+  startIndex?: number;
+  endIndex?: number;
   chunkText?: string;
   content?: string;
   score?: number;

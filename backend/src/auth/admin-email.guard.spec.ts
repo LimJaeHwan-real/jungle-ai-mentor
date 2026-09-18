@@ -1,6 +1,5 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
-import { AdminBlogsController } from '../ai/admin-blogs.controller';
 import { AdminDocumentsController } from '../ai/admin-documents.controller';
 import { AdminRagController } from '../ai/admin-rag.controller';
 import { AdminEmailGuard } from './admin-email.guard';
@@ -35,8 +34,8 @@ describe('관리자 이메일 허용 목록', () => {
     expect(auth.me({ email: 'person@example.com' } as never)).toMatchObject({ isAdmin: false });
   });
 
-  it('문서 등록·블로그 수집·RAG 운영 경로에서 인증 뒤 운영자 검사를 적용한다', () => {
-    for (const controller of [AdminBlogsController, AdminDocumentsController, AdminRagController]) {
+  it('문서 등록·RAG 운영 경로에서 인증 뒤 운영자 검사를 적용한다', () => {
+    for (const controller of [AdminDocumentsController, AdminRagController]) {
       expect(Reflect.getMetadata(GUARDS_METADATA, controller)).toEqual([JwtAuthGuard, AdminEmailGuard]);
     }
   });

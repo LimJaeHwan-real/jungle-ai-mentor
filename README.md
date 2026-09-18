@@ -11,22 +11,29 @@ React, NestJS, PostgreSQL, pgvector 기반의 AI 학습 커뮤니티 게시판 M
 - 게시글 CRUD, 댓글 CRUD, 태그, 검색, 페이지네이션
 - 질문 게시판과 정보공유 게시판 구분
 - 관리자 문서 등록 후 chunking, embedding, pgvector 검색
-- AI 질문 답변 저장과 공개 FAQ 발행
+- 내부 자료를 이용한 AI 질문 답변 저장과 공개 FAQ 발행
 - FAQ 목록/상세, 키워드/카테고리 검색, 조회수 증가
-- GitHub 저장소 분석 MCP adapter와 mock/fallback 모드
+- GitHub 저장소 소개·README 분석 adapter와 mock/fallback 모드
 - AgentService 기반 질문 분류와 tool routing
-- 크래프톤 정글 관련 블로그 사전 인덱싱, 본문 추출, RAG 저장
+- 사용자가 직접 켜는 일회성 크래프톤 정글 블로그 웹 검색과 인용 링크 표시
 - 외부 API 연결 없이도 데모 가능한 mock LLM, mock embedding, mock MCP
 
 ## 아키텍처
 
-<p align="center">
-  <img src="docs/architecture.png" alt="정글 AI 멘토 전체 아키텍처" width="100%" />
-</p>
+```mermaid
+flowchart LR
+  User[사용자] --> UI[질문 화면]
+  UI --> Agent[AgentService]
+  Agent --> RAG[내부 RAG 검색]
+  RAG --> DB[(내부 문서와 임베딩 DB)]
+  Agent -->|직접 허용했고 근거 부족| Web[OpenAI web_search]
+  Agent -->|GitHub 저장소 분석| GitHub[GitHub 소개와 README]
+  Web -->|인용 링크와 일회성 답변| UI
+  GitHub -->|일회성 분석 답변| UI
+```
 
-사용자 요청은 React 클라이언트에서 NestJS REST API로 전달됩니다. 일반 게시판 데이터는 PostgreSQL에 저장되고, AI 질문은 AgentService가 RAG 검색, OpenAI 답변 생성, GitHub 저장소 분석, 블로그 검색 도구로 분기합니다. 문서 chunk와 embedding은 pgvector를 통해 검색합니다.
+사용자 요청은 React 클라이언트에서 NestJS REST API로 전달됩니다. 일반 게시판 데이터는 PostgreSQL에 저장되고, AI 질문은 AgentService가 RAG 검색, OpenAI 답변 생성, GitHub 저장소 분석, 블로그 웹 검색 도구로 분기합니다. 등록된 내부 문서의 chunk와 embedding은 pgvector를 통해 검색합니다.
 
-다이어그램 원본은 [`docs/architecture.py`](docs/architecture.py)에서 확인할 수 있습니다.
 
 ## RAG 구조
 1. `POST /api/admin/documents`로 문서를 등록합니다.
@@ -40,38 +47,25 @@ React, NestJS, PostgreSQL, pgvector 기반의 AI 학습 커뮤니티 게시판 M
 ## MCP 구조
 - API: `POST /api/mcp/github/analyze`
 - Mock 모드는 외부 연결 없이 데모 분석을 반환합니다.
-- GitHub API 모드는 README, 저장소 metadata, root files를 조회합니다.
+- GitHub API 모드는 저장소 이름·설명과 README를 조회합니다.
 - MCP stdio 모드는 인터페이스 준비 상태이며 현재 MVP에서는 mock fallback을 반환합니다.
 - 외부 API 호출이 실패해도 전체 요청은 실패하지 않고 fallback 응답을 반환합니다.
 
-## 블로그 사전 인덱싱 구조
-질문할 때마다 블로그를 검색하면 느리고 embedding 비용이 중복으로 발생합니다. 그래서 기본 구조는 사전 인덱싱입니다.
+## 일회성 블로그 웹 검색
+질문 화면의 검색 옵션은 기본적으로 꺼져 있습니다. 사용자가 직접 켜고 내부 자료가 부족할 때만 OpenAI Responses API의 `web_search`를 한 번 실행합니다.
 
 ```text
-하루 1회 또는 수동 sync
-→ 크래프톤 정글 관련 블로그 검색
-→ 블로그 글 본문 추출
-→ RagService.indexDocument()로 새 글만 embedding, 변경 글은 re-index, 동일 글은 skip
-→ chunking, embedding, pgvector 저장
-
-사용자 질문
-→ 질문 embedding
-→ pgvector 검색
-→ 관련 chunk를 근거로 답변
+사용자 질문 + 직접 켠 검색 옵션
+→ 내부 자료 검색과 충분성 판정
+→ 부족하면 “크래프톤 정글”과 질문으로 웹 검색
+→ 인용된 블로그가 있으면 그 답변과 출처 링크를 화면에 표시
 ```
 
-수동 sync API:
-```text
-POST /api/admin/blogs/sync
-```
+검색은 요청당 20초 제한이며 자동 재시도하지 않습니다. 인용할 블로그가 없거나 호출에 실패하면 근거 부족 안내를 표시합니다. 요청에는 `store: false`를 설정해 OpenAI API 응답의 사후 조회용 저장을 끕니다. 이 설정이 외부 서비스의 모든 보존 정책을 바꾸는 것은 아닙니다.
 
-질문 화면의 `크래프톤 정글 블로그 미리 인덱싱` 버튼도 같은 API를 호출합니다.
+블로그 글·GitHub 자료의 본문과 임베딩은 DB에 저장하지 않습니다. 외부 자료를 사용한 답변도 질문 기록과 FAQ에 저장하지 않으며, 화면에 표시된 답변과 실제 인용 링크는 화면을 벗어나면 보존하지 않습니다. 이전에 수집된 `BLOG_SEARCH` 문서는 검색·재색인에서 제외합니다. 기존 DB 행의 삭제는 별도 대상 확인 후 결정합니다.
 
-질문 화면의 `근거 부족 시 블로그 검색 보강` 옵션은 기본적으로 꺼져 있습니다. 사용자가 직접 켠 질문에서 저장된 근거가 부족할 때만 실시간 검색과 가져오기를 수행합니다. 보강 후에도 충분한 근거가 없거나 재검색에 장애가 생기면 답변 생성을 건너뛰고 후보 자료를 출처로 표시하지 않습니다.
-
-질문 응답의 `retrievalStatus`는 최종 내부 검색 상태이고, `externalAugmentationStatus`는 외부 검색 미요청·검색했으나 채택 안 됨·답변 근거로 사용·실패·서버 설정으로 비활성 상태를 구분합니다. 외부 검색이 실패해도 내부 검색 장애로 표시하지 않습니다.
-
-블로그 검색은 DuckDuckGo HTML 검색을 기본 fallback으로 사용하며, Naver Blog Search API 연동과 자동 주기 sync도 지원합니다.
+질문 응답의 `retrievalStatus`는 내부 검색 상태이고, `externalAugmentationStatus`는 외부 검색 미요청·검색했지만 인용할 블로그 없음·답변 근거로 사용·검색 실패를 구분합니다. 외부 검색 실패를 내부 검색 장애로 표시하지 않습니다.
 
 ## Agent 구조
 `/api/ai/ask` 요청은 반드시 `AgentService`를 거칩니다.
@@ -86,7 +80,7 @@ POST /api/admin/blogs/sync
 
 정글 지식 답변의 `[1]` 같은 번호는 아래 참고 근거의 같은 번호와 연결됩니다. 근거에는 문서 제목·URL·chunk ID·섹션·원문 범위·색인 버전이 포함될 수 있습니다. 생성된 답변에 유효한 근거 번호가 하나도 없거나 존재하지 않는 번호가 있으면 답변 대신 재시도 안내를 표시합니다. 번호 검사는 출처 연결만 확인하며, 문장 내용의 사실 여부는 별도 평가가 필요합니다.
 
-`/admin/*` API는 로그인과 운영자 이메일 허용 목록을 모두 검사합니다. 서버 환경 변수 `ADMIN_EMAIL_ALLOWLIST`에 운영자 계정 이메일을 쉼표로 구분해 설정합니다. 비어 있으면 모든 관리자 API 접근을 거부합니다. 이메일 목록은 응답이나 로그에 포함하지 않으며, 질문 화면의 수동 블로그 색인 버튼은 운영자에게만 표시됩니다.
+`/admin/*` API는 로그인과 운영자 이메일 허용 목록을 모두 검사합니다. 서버 환경 변수 `ADMIN_EMAIL_ALLOWLIST`에 운영자 계정 이메일을 쉼표로 구분해 설정합니다. 비어 있으면 모든 관리자 API 접근을 거부합니다. 이메일 목록은 응답이나 로그에 포함하지 않습니다.
 
 운영자는 `RAG 운영` 화면에서 현재 프로세스의 검색·색인 지표와 재색인 대상을 조회할 수 있습니다. 상태 해석과 대응 절차는 [RAG 운영 점검 절차](docs/rag-operations-runbook.md)를 참고합니다.
 

@@ -2,13 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../users/user.entity';
-import { BlogSearchService } from './blog-search.service';
 import { AskAiDto } from './dto/ask-ai.dto';
 import { AgentRoute, AiQuestion } from './entities/ai-question.entity';
 import { FaqService } from './faq.service';
 import { GithubAnalysisResult, GithubMcpService } from './github-mcp.service';
 import { LlmService } from './llm.service';
 import { RagSearchResult, RagService } from './rag.service';
+import { WebSearchService } from './web-search.service';
 import { classifyQuestion } from './utils/agent-router';
 import { extractGithubRepositoryUrls } from './utils/github-url';
 
@@ -20,7 +20,7 @@ export class AgentService {
     private readonly faq: FaqService,
     private readonly github: GithubMcpService,
     private readonly llm: LlmService,
-    private readonly blogSearch: BlogSearchService,
+    private readonly webSearch: WebSearchService,
   ) {}
 
   async ask(user: User, dto: AskAiDto) {
@@ -33,9 +33,11 @@ export class AgentService {
     const usedTools: string[] = [];
     let answer = '';
     let references: unknown[] = [];
+    let containsExternalMaterial = false;
 
     if (route === AgentRoute.GITHUB_REPO) {
       usedTools.push('GITHUB_MCP_TOOL');
+      containsExternalMaterial = true;
       const analysis = await this.github.analyze(dto.repositoryUrl ?? dto.question);
       references = [analysis];
       state.githubFallback = analysis.fallback;
@@ -47,39 +49,29 @@ export class AgentService {
       answer = await this.llm.answer(dto.question, faqs, '공개 FAQ를 우선 참고해서 답변하세요.');
     } else if (route === AgentRoute.JUNGLE_KNOWLEDGE) {
       usedTools.push('RAG_SEARCH_TOOL');
-      let retrieval = await this.rag.searchWithStatus(dto.question);
-      let results = retrieval.results;
-      let externalAugmentationStatus: 'NOT_REQUESTED' | 'SEARCHED_NOT_USED' | 'EVIDENCE_USED' | 'FAILED' | 'DISABLED' = 'NOT_REQUESTED';
+      const retrieval = await this.rag.searchWithStatus(dto.question);
+      const results = retrieval.results;
+      let externalAugmentationStatus: 'NOT_REQUESTED' | 'SEARCHED_NOT_USED' | 'EVIDENCE_USED' | 'FAILED' = 'NOT_REQUESTED';
       state.ragFirst = {
         resultCount: results.length,
         topScore: results[0]?.score,
         status: retrieval.status,
       };
       if (dto.autoBlogSearch === true && retrieval.status === 'INSUFFICIENT_EVIDENCE') {
-        usedTools.push('BLOG_SEARCH_TOOL');
-        const blogSearch = await this.blogSearch.discoverAndImport(dto.question).catch(() => undefined);
-        if (!blogSearch) {
+        usedTools.push('WEB_SEARCH_TOOL');
+        const webResult = await this.webSearch.search(dto.question).catch(() => undefined);
+        if (webResult === undefined) {
           externalAugmentationStatus = 'FAILED';
-          state.blogSearch = { reason: 'external_search_failed' };
+          state.webSearch = { reason: 'external_search_failed' };
+        } else if (webResult === null) {
+          externalAugmentationStatus = 'SEARCHED_NOT_USED';
+          state.webSearch = { reason: 'no_cited_blog' };
         } else {
-          state.blogSearch = {
-            mode: blogSearch.mode,
-            query: blogSearch.query,
-            importedCount: blogSearch.importedCount,
-            resultCount: blogSearch.references.length,
-            reason: 'rag_results_insufficient',
-          };
-          if (blogSearch.mode === 'off') {
-            externalAugmentationStatus = 'DISABLED';
-          } else {
-            externalAugmentationStatus = 'SEARCHED_NOT_USED';
-            retrieval = await this.rag.searchWithStatus(dto.question, 6);
-            results = retrieval.results;
-            const discoveredDocumentIds = new Set(blogSearch.references.flatMap((reference) => reference.documentId ? [reference.documentId] : []));
-            if (retrieval.status === 'SUFFICIENT_EVIDENCE' && results.some((result) => discoveredDocumentIds.has(result.documentId))) {
-              externalAugmentationStatus = 'EVIDENCE_USED';
-            }
-          }
+          externalAugmentationStatus = 'EVIDENCE_USED';
+          state.webSearch = { resultCount: webResult.references.length };
+          answer = webResult.answer;
+          references = webResult.references;
+          containsExternalMaterial = true;
         }
       }
 
@@ -95,13 +87,18 @@ export class AgentService {
         answer = retrieval.status === 'SEARCH_DEGRADED'
           ? '현재 근거 검색 서비스에 일시적인 문제가 있어 신뢰할 수 있는 답변을 만들지 않았습니다. 잠시 후 다시 시도해 주세요.'
           : '현재 질문에 사용할 활성 지식 색인이 없습니다. 운영자가 문서를 색인하거나 재색인한 뒤 다시 시도해 주세요.';
-      } else if (retrieval.status === 'INSUFFICIENT_EVIDENCE') {
+      } else if (retrieval.status === 'INSUFFICIENT_EVIDENCE' && externalAugmentationStatus !== 'EVIDENCE_USED') {
         references = [];
-        answer = '등록된 근거에서 질문에 답할 만큼 충분한 내용을 확인하지 못했습니다. 질문을 더 구체적으로 하거나 자료가 추가된 뒤 다시 시도해 주세요.';
-      } else {
+        answer = externalAugmentationStatus === 'FAILED'
+          ? '외부 블로그 검색에 실패했고 등록된 근거에서도 충분한 내용을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+          : externalAugmentationStatus === 'SEARCHED_NOT_USED'
+            ? '등록된 근거가 부족하고 인용할 수 있는 블로그 후기도 찾지 못했습니다. 질문을 더 구체적으로 해 주세요.'
+            : '등록된 근거에서 질문에 답할 만큼 충분한 내용을 확인하지 못했습니다. 질문을 더 구체적으로 하거나 자료가 추가된 뒤 다시 시도해 주세요.';
+      } else if (retrieval.status === 'SUFFICIENT_EVIDENCE') {
         references = results;
         const githubAnalyses = await this.analyzeGithubUrlsFromRagResults(results);
         if (githubAnalyses.length > 0) {
+          containsExternalMaterial = true;
           usedTools.push('GITHUB_MCP_TOOL');
           state.githubFromRag = {
             repositoryCount: githubAnalyses.length,
@@ -131,7 +128,7 @@ export class AgentService {
               sourceUrl: analysis.repositoryUrl,
             })),
           ],
-          '제공된 근거에 있는 내용만 답변하고, 핵심 주장마다 해당 근거 번호 [1], [2]를 표시하세요. 근거 안에 GitHub 저장소 분석 정보가 있으면 해당 저장소의 목적, README 요약, 파일 힌트를 설명할 수 있습니다. 근거가 부족한 부분은 단정하지 마세요.',
+          '제공된 근거에 있는 내용만 답변하고, 핵심 주장마다 해당 근거 번호 [1], [2]를 표시하세요. 근거 안에 GitHub 저장소 분석 정보가 있으면 저장소 소개와 README 요약을 설명할 수 있습니다. 근거가 부족한 부분은 단정하지 마세요.',
         );
         const citedNumbers = [...answer.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1]));
         if (citedNumbers.length === 0 || citedNumbers.some((number) => number < 1 || number > references.length)) {
@@ -146,6 +143,23 @@ export class AgentService {
       answer = await this.llm.answer(dto.question);
     }
 
+    const completedState: Record<string, unknown> = { ...state, finishedAt: new Date().toISOString() };
+    if (containsExternalMaterial) {
+      return {
+        id: null,
+        question: dto.question,
+        answer,
+        usedTools,
+        agentRoute: route,
+        agentState: completedState,
+        retrievalStatus: completedState.retrievalStatus,
+        externalAugmentationStatus: completedState.externalAugmentationStatus,
+        references,
+        isPublic: false,
+        createdAt: new Date(),
+      };
+    }
+
     const question = await this.questions.save(
       this.questions.create({
         userId: user.id,
@@ -153,10 +167,7 @@ export class AgentService {
         answer,
         usedTools,
         agentRoute: route,
-        agentState: {
-          ...state,
-          finishedAt: new Date().toISOString(),
-        },
+        agentState: completedState,
       }),
     );
 
@@ -187,7 +198,6 @@ export class AgentService {
     return [
       analysis.summary,
       analysis.readmePreview ? `README preview: ${analysis.readmePreview}` : '',
-      analysis.fileHints.length ? `Files: ${analysis.fileHints.join(', ')}` : '',
     ]
       .filter(Boolean)
       .join('\n');

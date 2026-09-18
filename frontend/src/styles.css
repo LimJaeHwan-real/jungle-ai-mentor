@@ -668,6 +668,11 @@ select:focus {
   font-size: 13px;
 }
 
+.answer-box a {
+  color: var(--primary-dark);
+  text-decoration: underline;
+}
+
 .detail-view {
   display: grid;
   gap: 14px;
