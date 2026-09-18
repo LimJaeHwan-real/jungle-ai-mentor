@@ -6,27 +6,28 @@ describe('AgentService 검색 장애 처리', () => {
     save: jest.fn(async (value) => ({ ...value, id: 'question-1', isPublic: false, createdAt: new Date() })),
   });
 
-  it('근거가 부족하고 외부 검색을 허용하지 않으면 LLM 답변을 만들지 않는다', async () => {
+  it('근거가 부족하면 별도 선택값 없이 웹 검색을 한 번 시도하고 출처가 없을 때 LLM 답변을 만들지 않는다', async () => {
     const rag = { searchWithStatus: jest.fn(async () => ({ results: [{ chunkId: 'weak-chunk' }], status: 'INSUFFICIENT_EVIDENCE' })) };
     const llm = { answer: jest.fn() };
-    const webSearch = { search: jest.fn() };
+    const webSearch = { search: jest.fn(async () => null) };
     const service = new AgentService(questions() as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
 
     const response = await service.ask({ id: 'user-1' } as never, { question: '정글 합격률은 몇 퍼센트인가요?' });
 
     expect(response.retrievalStatus).toBe('INSUFFICIENT_EVIDENCE');
     expect(response.answer).toContain('등록된 근거');
+    expect(response.externalAugmentationStatus).toBe('SEARCHED_NOT_USED');
     expect(llm.answer).not.toHaveBeenCalled();
-    expect(webSearch.search).not.toHaveBeenCalled();
+    expect(webSearch.search).toHaveBeenCalledTimes(1);
   });
 
-  it('외부 검색에 인용할 블로그가 없으면 답변 근거로 사용하지 않는다', async () => {
+  it('이전 클라이언트가 검색을 끄는 값을 보내도 근거가 부족하면 검색하고 인용할 블로그가 없을 때 사용하지 않는다', async () => {
     const rag = { searchWithStatus: jest.fn(async () => ({ results: [], status: 'INSUFFICIENT_EVIDENCE' })) };
     const llm = { answer: jest.fn() };
     const webSearch = { search: jest.fn(async () => null) };
     const service = new AgentService(questions() as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
 
-    const response = await service.ask({ id: 'user-1' } as never, { question: '정글 합격률은 몇 퍼센트인가요?', autoBlogSearch: true });
+    const response = await service.ask({ id: 'user-1' } as never, { question: '정글 합격률은 몇 퍼센트인가요?', autoBlogSearch: false } as never);
 
     expect(response.retrievalStatus).toBe('INSUFFICIENT_EVIDENCE');
     expect(response.answer).toContain('등록된 근거');
@@ -37,7 +38,7 @@ describe('AgentService 검색 장애 처리', () => {
     expect(llm.answer).not.toHaveBeenCalled();
   });
 
-  it('명시적으로 허용한 웹 검색 답변과 실제 인용 출처를 반환하고 DB에 저장하지 않는다', async () => {
+  it('자동 웹 검색 답변과 실제 인용 출처를 반환하고 DB에 저장하지 않는다', async () => {
     const rag = { searchWithStatus: jest.fn(async () => ({ results: [], status: 'INSUFFICIENT_EVIDENCE' })) };
     const llm = { answer: jest.fn() };
     const repository = questions();
@@ -45,7 +46,7 @@ describe('AgentService 검색 장애 처리', () => {
     const webSearch = { search: jest.fn(async () => ({ answer: '정글 생활 후기 [1]', references: [reference] })) };
     const service = new AgentService(repository as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
 
-    const response = await service.ask({ id: 'user-1' } as never, { question: '정글 과정에 팀 프로젝트가 있나요?', autoBlogSearch: true });
+    const response = await service.ask({ id: 'user-1' } as never, { question: '정글 과정에 팀 프로젝트가 있나요?' });
 
     expect(webSearch.search).toHaveBeenCalledWith('정글 과정에 팀 프로젝트가 있나요?');
     expect(rag.searchWithStatus).toHaveBeenCalledTimes(1);
@@ -64,7 +65,7 @@ describe('AgentService 검색 장애 처리', () => {
     const webSearch = { search: jest.fn(async () => { throw new Error('external search failed'); }) };
     const service = new AgentService(questions() as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
 
-    const response = await service.ask({ id: 'user-1' } as never, { question: '정글 준비 방법 알려줘', autoBlogSearch: true });
+    const response = await service.ask({ id: 'user-1' } as never, { question: '정글 준비 방법 알려줘' });
 
     expect(response.retrievalStatus).toBe('INSUFFICIENT_EVIDENCE');
     expect(response.externalAugmentationStatus).toBe('FAILED');
@@ -131,7 +132,7 @@ describe('AgentService 검색 장애 처리', () => {
     const webSearch = { search: jest.fn() };
     const service = new AgentService(questions as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
 
-    const response = await service.ask({ id: 'user-1' } as never, { question: '정글 지원 일정 알려줘', autoBlogSearch: true });
+    const response = await service.ask({ id: 'user-1' } as never, { question: '정글 지원 일정 알려줘' });
 
     expect(response.retrievalStatus).toBe('SEARCH_DEGRADED');
     expect(response.references).toEqual([]);
@@ -150,7 +151,7 @@ describe('AgentService 검색 장애 처리', () => {
     const webSearch = { search: jest.fn() };
     const service = new AgentService(questions as never, rag as never, {} as never, {} as never, llm as never, webSearch as never);
 
-    const response = await service.ask({ id: 'user-1' } as never, { question: '정글 지원 일정 알려줘', autoBlogSearch: true });
+    const response = await service.ask({ id: 'user-1' } as never, { question: '정글 지원 일정 알려줘' });
 
     expect(response.retrievalStatus).toBe('NO_ACTIVE_INDEX');
     expect(response.answer).toContain('활성 지식 색인');

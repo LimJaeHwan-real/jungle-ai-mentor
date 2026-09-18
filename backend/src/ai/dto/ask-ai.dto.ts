@@ -1,5 +1,4 @@
-import { Type } from 'class-transformer';
-import { IsBoolean, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsOptional, IsString, MinLength } from 'class-validator';
 
 export class AskAiDto {
   @IsString()
@@ -9,9 +8,4 @@ export class AskAiDto {
   @IsOptional()
   @IsString()
   repositoryUrl?: string;
-
-  @IsOptional()
-  @Type(() => Boolean)
-  @IsBoolean()
-  autoBlogSearch?: boolean;
 }

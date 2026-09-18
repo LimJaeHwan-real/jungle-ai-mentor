@@ -57,7 +57,7 @@ export class AgentService {
         topScore: results[0]?.score,
         status: retrieval.status,
       };
-      if (dto.autoBlogSearch === true && retrieval.status === 'INSUFFICIENT_EVIDENCE') {
+      if (retrieval.status === 'INSUFFICIENT_EVIDENCE') {
         usedTools.push('WEB_SEARCH_TOOL');
         const webResult = await this.webSearch.search(dto.question).catch(() => undefined);
         if (webResult === undefined) {

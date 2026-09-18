@@ -34,7 +34,6 @@ function answerWithCitations(result: AiAnswer): ReactNode {
 
 export function AskPage() {
   const [question, setQuestion] = useState('');
-  const [autoBlogSearch, setAutoBlogSearch] = useState(false);
   const [answer, setAnswer] = useState<AiAnswer | undefined>();
   const [publishMessage, setPublishMessage] = useState('');
 
@@ -43,7 +42,6 @@ export function AskPage() {
       (
         await api.post<AiAnswer>('/ai/ask', {
           question,
-          autoBlogSearch,
         })
       ).data,
     onSuccess(data) {
@@ -87,13 +85,6 @@ export function AskPage() {
               required
               placeholder="정글 학습, FAQ, 블로그 후기 관련 질문을 입력하세요."
             />
-          </label>
-          <label className="checkbox-row">
-            <input type="checkbox" checked={autoBlogSearch} onChange={(event) => setAutoBlogSearch(event.target.checked)} />
-            <span>
-              <strong>근거 부족 시 실시간 블로그 검색</strong>
-              <small>직접 켠 질문에서 등록된 자료가 부족할 때만 웹을 검색합니다. 외부 글과 답변은 저장하지 않습니다.</small>
-            </span>
           </label>
           {askMutation.error && <p className="error-text">{getErrorMessage(askMutation.error)}</p>}
           <button className="primary-button" type="submit" disabled={askMutation.isPending}>
@@ -160,7 +151,7 @@ export function AskPage() {
                     : answer.retrievalStatus === 'NO_ACTIVE_INDEX'
                       ? '현재 활성 지식 색인이 없어 참고 근거를 표시하지 않았습니다. 문서 색인 후 다시 시도해 주세요.'
                     : answer.retrievalStatus === 'INSUFFICIENT_EVIDENCE'
-                      ? '답변에 사용할 만큼 충분한 근거를 찾지 못했습니다. 질문을 구체적으로 바꾸거나 블로그 검색 보강을 직접 켜고 다시 질문해보세요.'
+                      ? '답변에 사용할 만큼 충분한 근거를 찾지 못했습니다. 질문을 더 구체적으로 바꿔 다시 시도해보세요.'
                       : '아직 표시할 참고 근거가 없습니다.'}
                 </p>
               )}
