@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "scripts": {
     "build": "nest build",
+    "admin:create": "ts-node scripts/create-admin.ts",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "test": "jest --runInBand",

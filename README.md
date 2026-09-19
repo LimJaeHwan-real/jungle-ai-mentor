@@ -102,3 +102,5 @@ npm.cmd --prefix frontend run dev
 접속:
 - Frontend: `http://localhost:5173`
 - Backend health: `http://localhost:3000/api/health`
+
+관리자 허용 이메일은 공개 회원가입에서 차단합니다. 관리자 생성은 대화형 전용 명령으로 수행하며 기존 계정은 덮어쓰지 않습니다. [안전한 관리자 계정 생성 절차](docs/admin-account-provisioning.md)를 먼저 확인하세요.
