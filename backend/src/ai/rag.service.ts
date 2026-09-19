@@ -233,6 +233,22 @@ export class RagService {
     const startedAt = Date.now();
     try {
       const embedding = await this.embeddings.embed(question);
+      return await this.searchCandidatesForEmbedding(question, embedding, limit, startedAt);
+    } catch {
+      return this.degradedCandidates(question, limit, startedAt);
+    }
+  }
+
+  async searchCandidatesWithEmbedding(question: string, embedding: number[], limit = 4): Promise<RagCandidateResponse> {
+    const startedAt = Date.now();
+    try {
+      return await this.searchCandidatesForEmbedding(question, embedding, limit, startedAt);
+    } catch {
+      return this.degradedCandidates(question, limit, startedAt);
+    }
+  }
+
+  private async searchCandidatesForEmbedding(question: string, embedding: number[], limit: number, startedAt: number): Promise<RagCandidateResponse> {
       const vector = this.embeddings.toSqlVector(embedding);
       const metadata = this.embeddings.getMetadata();
       const rows = (await this.chunks.query(
@@ -276,12 +292,13 @@ export class RagService {
       const status = results.length > 0 ? 'CANDIDATES_FOUND'
         : await this.hasCompatibleActiveIndex(metadata) ? 'INSUFFICIENT_EVIDENCE' : 'NO_ACTIVE_INDEX';
       return { results, status, startedAt };
+  }
+
+  private async degradedCandidates(question: string, limit: number, startedAt: number): Promise<RagCandidateResponse> {
+    try {
+      return { results: await this.lexicalSearch(question, limit), status: 'SEARCH_DEGRADED', startedAt };
     } catch {
-      try {
-        return { results: await this.lexicalSearch(question, limit), status: 'SEARCH_DEGRADED', startedAt };
-      } catch {
-        return { results: [], status: 'SEARCH_DEGRADED', startedAt };
-      }
+      return { results: [], status: 'SEARCH_DEGRADED', startedAt };
     }
   }
 

@@ -30,6 +30,36 @@ describe('EmbeddingService 운영 정책', () => {
     expect(target.getMetadata()).toMatchObject({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', dimension: 1536 });
   });
 
+  it('비교 수집용 batch embedding은 한 HTTP 요청으로 순서대로 반환하고 재시도하지 않는다', async () => {
+    const request = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ index: 1, embedding: [0.3, 0.4] }, { index: 0, embedding: [0.1, 0.2] }] }),
+    } as Response);
+    const target = service({ RAG_RUNTIME_ENV: 'production', OPENAI_API_KEY: 'configured', RAG_EMBEDDING_DIMENSION: '2' });
+
+    await expect(target.embedBatch(['first', 'second'])).resolves.toEqual([[0.1, 0.2], [0.3, 0.4]]);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(request.mock.calls[0][1]?.body as string).input).toEqual(['first', 'second']);
+  });
+
+  it('비교 수집용 batch embedding 실패는 재시도하거나 mock으로 전환하지 않는다', async () => {
+    const request = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: false, status: 503 } as Response);
+    const target = service({ RAG_RUNTIME_ENV: 'production', OPENAI_API_KEY: 'configured', RAG_EMBEDDING_DIMENSION: '2' });
+
+    await expect(target.embedBatch(['only'])).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it('비교 수집용 batch embedding은 누락된 질문 결과를 성공으로 처리하지 않는다', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [{ index: 1, embedding: [0.3, 0.4] }] }),
+    } as Response);
+    const target = service({ RAG_RUNTIME_ENV: 'production', OPENAI_API_KEY: 'configured', RAG_EMBEDDING_DIMENSION: '2' });
+
+    await expect(target.embedBatch(['first', 'second'])).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
   it('local real 모드에서 키가 없으면 mock으로 자동 전환하지 않는다', async () => {
     const target = service({ RAG_RUNTIME_ENV: 'local', RAG_EMBEDDING_MODE: 'real' });
     await expect(target.embed('정글 알고리즘')).rejects.toBeInstanceOf(ServiceUnavailableException);

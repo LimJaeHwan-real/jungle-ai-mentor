@@ -37,6 +37,63 @@ export class EmbeddingService implements OnModuleInit {
     }
   }
 
+  async embedBatch(texts: readonly string[]): Promise<number[][]> {
+    if (texts.length === 0) return [];
+
+    const startedAt = Date.now();
+    this.metrics.recordEmbeddingRequest(this.getMetadata());
+    try {
+      if (this.mode() === 'mock') {
+        const embeddings = texts.map((text) => this.mockEmbedding(text));
+        this.metrics.recordEmbeddingResult(true, Date.now() - startedAt);
+        return embeddings;
+      }
+
+      const apiKey = this.config.get<string>('OPENAI_API_KEY');
+      if (!apiKey) throw new ServiceUnavailableException('임베딩 서비스를 사용할 수 없습니다. 명시적 demo/local mock 모드가 아닌 경우 mock으로 전환하지 않습니다.');
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      try {
+        const response = await fetch('https://api.openai.com/v1/embeddings', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: this.config.get<string>('OPENAI_EMBEDDING_MODEL') ?? 'text-embedding-3-small',
+            input: texts,
+          }),
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new ServiceUnavailableException('임베딩 서비스 요청이 거부되었습니다. mock으로 자동 전환하지 않습니다.');
+        const data = await response.json() as { data?: Array<{ index?: unknown; embedding?: unknown }> };
+        const embeddings = new Array<number[]>(texts.length);
+        for (const item of data.data ?? []) {
+          const index = item.index;
+          const embedding = item.embedding;
+          if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= texts.length
+            || !Array.isArray(embedding) || embedding.length !== this.dimension
+            || embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value)) || embeddings[index]) {
+            throw new ServiceUnavailableException('임베딩 응답 형식이 유효하지 않습니다.');
+          }
+          embeddings[index] = embedding;
+        }
+        if (Array.from({ length: texts.length }, (_, index) => embeddings[index]).some((embedding) => !embedding)) {
+          throw new ServiceUnavailableException('임베딩 응답 형식이 유효하지 않습니다.');
+        }
+        this.metrics.recordEmbeddingResult(true, Date.now() - startedAt);
+        return embeddings;
+      } catch (error) {
+        if (error instanceof ServiceUnavailableException) throw error;
+        throw new ServiceUnavailableException('임베딩 서비스를 사용할 수 없습니다. mock으로 자동 전환하지 않습니다.');
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (error) {
+      this.metrics.recordEmbeddingResult(false, Date.now() - startedAt);
+      throw error;
+    }
+  }
+
   private async createEmbedding(text: string): Promise<number[]> {
     if (this.mode() === 'mock') return this.mockEmbedding(text);
     const apiKey = this.config.get<string>('OPENAI_API_KEY');

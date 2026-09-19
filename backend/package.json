@@ -8,6 +8,7 @@
     "start:dev": "nest start --watch",
     "test": "jest --runInBand",
     "rag:evaluate": "ts-node scripts/evaluate-rag.ts",
+    "rag:collect": "ts-node scripts/collect-rag-retrieval.ts",
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/database/data-source.ts",
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/database/data-source.ts"
   },

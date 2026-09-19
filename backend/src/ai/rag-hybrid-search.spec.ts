@@ -3,6 +3,25 @@ import { RagService, RagSearchResult } from './rag.service';
 const result = (chunkId: string, score = 0, documentId = chunkId): RagSearchResult => ({ chunkId, documentId, title: chunkId, category: 'GENERAL', chunkText: chunkId, score });
 
 describe('RagService RRF 후보 결합', () => {
+  it('이미 계산된 query embedding으로 후보 검색을 수행해 임베딩을 다시 요청하지 않는다', async () => {
+    const chunks = { query: jest.fn().mockResolvedValueOnce([result('vector', 0.8)]).mockResolvedValueOnce([]) };
+    const embeddings = {
+      embed: jest.fn(),
+      toSqlVector: jest.fn(() => '[0.1,0.2]'),
+      getMetadata: jest.fn(() => ({ provider: 'openai', model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 })),
+    };
+    const service = Object.create(RagService.prototype) as any;
+    Object.assign(service, {
+      chunks,
+      embeddings,
+      metrics: { recordSearch: jest.fn(), recordRetrievalCandidates: jest.fn(), recordRetrievalFailure: jest.fn() },
+    });
+
+    await expect(service.searchCandidatesWithEmbedding('면접 후기', [0.1, 0.2], 4)).resolves.toMatchObject({ status: 'CANDIDATES_FOUND' });
+    expect(embeddings.embed).not.toHaveBeenCalled();
+    expect(embeddings.toSqlVector).toHaveBeenCalledWith([0.1, 0.2]);
+  });
+
   it('게시글 후보가 없어도 활성 색인이 있으면 FAQ 후보를 함께 판정한다', async () => {
     const faq = { ...result('faq:faq-1'), faqId: 'faq-1', category: 'FAQ' };
     const service = Object.create(RagService.prototype) as any;
