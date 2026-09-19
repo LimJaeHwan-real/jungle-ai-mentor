@@ -1,23 +1,24 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { DataSource } from 'typeorm';
-import dataSource from '../src/database/data-source';
 import { EmbeddingService } from '../src/ai/embedding.service';
 import { EvidenceAssessmentService } from '../src/ai/evidence-assessment.service';
 import { RagMetricsService } from '../src/ai/rag-metrics.service';
 import { RagService } from '../src/ai/rag.service';
 import { collectComparableRetrievalResults } from '../src/ai/utils/rag-retrieval-collector';
 import { ReadOnlyRagCollectorRepository } from '../src/ai/utils/read-only-rag-collector-repository';
+import { createReadOnlyCollectorDataSource } from '../src/ai/utils/rag-collector-runtime';
 
 async function main() {
-  ConfigModule.forRoot({ isGlobal: false, envFilePath: ['.env.local', '.env'] });
+  const source = await createReadOnlyCollectorDataSource(
+    () => { ConfigModule.forRoot({ isGlobal: false, envFilePath: ['.env.local', '.env'] }); },
+    async () => (await import('../src/database/data-source')).createDataSourceOptions(),
+  );
   const config = new ConfigService(process.env);
   const metrics = new RagMetricsService();
   const embeddings = new EmbeddingService(config, metrics);
   embeddings.onModuleInit();
   if (embeddings.getMetadata().mode !== 'real') throw new Error('live collection requires RAG_EMBEDDING_MODE=real');
-  const source = new DataSource({ ...dataSource.options, synchronize: false, migrationsRun: false });
   await source.initialize();
   const runner = source.createQueryRunner();
 
