@@ -5,6 +5,7 @@ export interface User {
   id: string;
   email: string;
   nickname: string;
+  isAdmin: boolean;
 }
 
 export interface Post {
@@ -57,25 +58,31 @@ export interface Faq {
 }
 
 export interface AiAnswer {
-  id: string;
+  id: string | null;
   question: string;
   answer: string;
   usedTools: string[];
   agentRoute: string;
   agentState: Record<string, unknown>;
+  answerStatus?: 'GITHUB_URL_REQUIRED' | 'GITHUB_ANALYSIS' | 'GITHUB_ANALYSIS_FAILED' | 'WEB_EVIDENCE' | 'INTERNAL_SEARCH_FAILED' | 'NO_ACTIVE_INDEX' | 'WEB_SEARCH_FAILED' | 'NO_EVIDENCE' | 'ANSWER_CITATION_FAILED' | 'ANSWER_GENERATION_FAILED' | 'INTERNAL_EVIDENCE';
   retrievalStatus?: 'SUFFICIENT_EVIDENCE' | 'INSUFFICIENT_EVIDENCE' | 'NO_ACTIVE_INDEX' | 'SEARCH_DEGRADED';
+  externalAugmentationStatus?: 'NOT_REQUESTED' | 'SEARCHED_NOT_USED' | 'EVIDENCE_USED' | 'FAILED';
   references: AiReference[];
   isPublic: boolean;
   createdAt: string;
 }
 
 export interface AiReference {
+  chunkId?: string;
+  faqId?: string;
+  chunkingVersion?: string;
+  embeddingVersion?: string;
+  indexedAt?: string;
   type?: string;
   title?: string;
   sourceUrl?: string;
-  snippet?: string;
-  imported?: boolean;
-  reason?: string;
+  startIndex?: number;
+  endIndex?: number;
   chunkText?: string;
   content?: string;
   score?: number;

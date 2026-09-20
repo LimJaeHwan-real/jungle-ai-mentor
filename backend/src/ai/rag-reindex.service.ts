@@ -13,6 +13,8 @@ interface ClaimedItem {
   documentId: string;
 }
 
+class LeaseRenewalError extends Error {}
+
 @Injectable()
 export class RagReindexService implements OnModuleInit {
   private readonly leaseMinutes = 30;
@@ -47,6 +49,7 @@ export class RagReindexService implements OnModuleInit {
           embeddingMode: metadata.mode,
           embeddingVersion: metadata.version,
           embeddingDimension: metadata.dimension,
+          chunkingVersion: this.rag.getChunkingVersion(),
         }),
       );
       let queuedCount = 0;
@@ -89,6 +92,7 @@ export class RagReindexService implements OnModuleInit {
         mode: job.embeddingMode,
         version: job.embeddingVersion,
         dimension: job.embeddingDimension,
+        chunkingVersion: job.chunkingVersion,
       },
       startedAt: job.startedAt,
       finishedAt: job.finishedAt,
@@ -121,7 +125,7 @@ export class RagReindexService implements OnModuleInit {
 
   private async claimNextItem(): Promise<ClaimedItem | undefined> {
     return this.dataSource.transaction(async (manager) => {
-      const rows = (await manager.query(
+      const [rows] = (await manager.query(
         `WITH candidate AS (
            SELECT id
            FROM rag_reindex_job_items
@@ -135,7 +139,7 @@ export class RagReindexService implements OnModuleInit {
          FROM candidate
          WHERE item.id = candidate.id
          RETURNING item.id, item."jobId" AS "jobId", item."documentId" AS "documentId"`,
-      )) as ClaimedItem[];
+      )) as [ClaimedItem[], number];
       const item = rows[0];
       if (!item) return undefined;
       await manager.query(
@@ -150,21 +154,42 @@ export class RagReindexService implements OnModuleInit {
 
   private async processItem(item: ClaimedItem) {
     let timer: NodeJS.Timeout | undefined;
+    let heartbeat: Promise<void> | undefined;
+    let leaseRenewalFailed = false;
     try {
       timer = setInterval(() => {
-        void this.dataSource.query(
-          `UPDATE rag_reindex_job_items SET "leaseUntil" = NOW() + INTERVAL '${this.leaseMinutes} minutes', "updatedAt" = NOW() WHERE id = $1 AND status = 'RUNNING'`,
-          [item.id],
-        );
+        if (heartbeat) return;
+        heartbeat = this.renewLease(item.id)
+          .catch(() => { leaseRenewalFailed = true; })
+          .finally(() => { heartbeat = undefined; });
       }, 60_000);
       await this.rag.reindexDocument(item.documentId);
+      if (timer) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+      if (heartbeat) await heartbeat;
+      if (leaseRenewalFailed) throw new LeaseRenewalError();
       await this.completeItem(item, 'SUCCEEDED');
     } catch (error) {
+      if (timer) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+      if (heartbeat) await heartbeat;
       const failure = this.safeFailure(error);
       await this.completeItem(item, 'FAILED', failure.code, failure.message);
     } finally {
       if (timer) clearInterval(timer);
     }
+  }
+
+  private async renewLease(itemId: string) {
+    const [rows] = (await this.dataSource.query(
+      `UPDATE rag_reindex_job_items SET "leaseUntil" = NOW() + INTERVAL '${this.leaseMinutes} minutes', "updatedAt" = NOW() WHERE id = $1 AND status = 'RUNNING' RETURNING id`,
+      [itemId],
+    )) as [Array<{ id: string }>, number];
+    if (!rows.length) throw new LeaseRenewalError();
   }
 
   private async completeItem(item: ClaimedItem, status: RagReindexJobItemStatus, errorCode?: string, errorMessage?: string) {
@@ -214,6 +239,9 @@ export class RagReindexService implements OnModuleInit {
   }
 
   private safeFailure(error: unknown) {
+    if (error instanceof LeaseRenewalError) {
+      return { code: 'LEASE_RENEWAL_FAILED', message: '재색인 작업의 임대를 연장하지 못했습니다.' };
+    }
     if (error instanceof NotFoundException) {
       return { code: 'DOCUMENT_NOT_FOUND', message: '재색인 대상 문서를 찾을 수 없습니다.' };
     }

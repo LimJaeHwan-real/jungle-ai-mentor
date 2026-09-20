@@ -30,6 +30,9 @@ export class KnowledgeDocument {
   @Column({ nullable: true })
   embeddingModel?: string;
 
+  @Column({ type: 'varchar', nullable: true })
+  embeddingProvider?: string | null;
+
   @Column({ nullable: true })
   embeddingMode?: string;
 
@@ -38,6 +41,18 @@ export class KnowledgeDocument {
 
   @Column({ nullable: true })
   embeddingDimension?: number;
+
+  @Column({ type: 'timestamp', nullable: true })
+  embeddingGeneratedAt?: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  indexedAt?: Date | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  indexErrorCode?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  chunkingVersion?: string | null;
 
   @OneToMany(() => DocumentChunk, (chunk) => chunk.document)
   chunks: DocumentChunk[];

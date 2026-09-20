@@ -1,12 +1,13 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AdminEmailGuard } from '../auth/admin-email.guard';
 import { RagMetricsService } from './rag-metrics.service';
 import { CreateRagReindexJobDto } from './dto/create-rag-reindex-job.dto';
 import { RagReindexService } from './rag-reindex.service';
 import { RagService } from './rag.service';
 
 @Controller('admin/rag')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, AdminEmailGuard)
 export class AdminRagController {
   constructor(
     private readonly ragService: RagService,

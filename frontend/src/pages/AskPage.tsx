@@ -1,22 +1,22 @@
 import { FormEvent, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { Bot, ExternalLink, RefreshCw, Search, Send, UploadCloud } from 'lucide-react';
+import { Bot, ExternalLink, Search, Send, UploadCloud } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api, getErrorMessage } from '../api';
 import { AiAnswer, Faq } from '../types';
+import { AnswerMarkdown, publicUrl } from '../components/AnswerMarkdown';
+import { answerStatusLabel } from '../utils/answer-status';
 
 export function AskPage() {
   const [question, setQuestion] = useState('');
-  const [autoBlogSearch, setAutoBlogSearch] = useState(true);
   const [answer, setAnswer] = useState<AiAnswer | undefined>();
   const [publishMessage, setPublishMessage] = useState('');
-  const [syncMessage, setSyncMessage] = useState('');
 
   const askMutation = useMutation({
     mutationFn: async () =>
       (
         await api.post<AiAnswer>('/ai/ask', {
           question,
-          autoBlogSearch,
         })
       ).data,
     onSuccess(data) {
@@ -35,21 +35,6 @@ export function AskPage() {
       ).data,
     onSuccess(data) {
       setPublishMessage(`FAQ로 공개했습니다: ${data.title}`);
-    },
-  });
-
-  const syncBlogsMutation = useMutation({
-    mutationFn: async () =>
-      (await api.post('/admin/blogs/sync', { maxResultsPerQuery: 3 })).data as {
-        createdCount?: number;
-        updatedCount?: number;
-        skippedCount?: number;
-        failedCount?: number;
-      },
-    onSuccess(data) {
-      setSyncMessage(
-        `인덱싱 완료: 새 글 ${data.createdCount ?? 0}개, 업데이트 ${data.updatedCount ?? 0}개, 유지 ${data.skippedCount ?? 0}개, 실패 ${data.failedCount ?? 0}개`,
-      );
     },
   });
 
@@ -73,21 +58,9 @@ export function AskPage() {
               onChange={(event) => setQuestion(event.target.value)}
               rows={8}
               required
-              placeholder="정글 학습, FAQ, 블로그 근거 기반 질문을 입력하세요."
+              placeholder="정글 학습, FAQ, 블로그 후기 관련 질문을 입력하세요."
             />
           </label>
-          <label className="checkbox-row">
-            <input type="checkbox" checked={autoBlogSearch} onChange={(event) => setAutoBlogSearch(event.target.checked)} />
-            <span>
-              <strong>근거 부족 시 블로그 검색 보강</strong>
-              <small>기본은 저장된 pgvector를 빠르게 검색하고, 근거가 없을 때만 실시간 검색을 보강합니다.</small>
-            </span>
-          </label>
-          <button className="secondary-button" type="button" disabled={syncBlogsMutation.isPending} onClick={() => syncBlogsMutation.mutate()}>
-            <RefreshCw size={17} /> {syncBlogsMutation.isPending ? '블로그 인덱싱 중' : '크래프톤 정글 블로그 미리 인덱싱'}
-          </button>
-          {syncBlogsMutation.error && <p className="error-text">{getErrorMessage(syncBlogsMutation.error)}</p>}
-          {syncMessage && <p className="success-text">{syncMessage}</p>}
           {askMutation.error && <p className="error-text">{getErrorMessage(askMutation.error)}</p>}
           <button className="primary-button" type="submit" disabled={askMutation.isPending}>
             <Send size={17} /> {askMutation.isPending ? '근거 검색과 답변 생성 중' : '질문하기'}
@@ -101,14 +74,22 @@ export function AskPage() {
           <>
             <div className="tool-row">
               <span className="route-badge">{answer.agentRoute}</span>
+              {answer.answerStatus && <span className="tag-pill">답변 상태: {answerStatusLabel(answer.answerStatus)}</span>}
               {answer.retrievalStatus && <span className="tag-pill">검색 상태: {answer.retrievalStatus}</span>}
+              {answer.externalAugmentationStatus && answer.externalAugmentationStatus !== 'NOT_REQUESTED' && (
+                <span className="tag-pill">외부 보강: {{
+                  SEARCHED_NOT_USED: '검색했지만 답변 근거로 사용 안 함',
+                  EVIDENCE_USED: '답변 근거로 사용',
+                  FAILED: '검색 실패',
+                }[answer.externalAugmentationStatus]}</span>
+              )}
               {answer.usedTools.map((tool) => (
                 <span className="tag-pill" key={tool}>
                   {tool}
                 </span>
               ))}
             </div>
-            <pre className="answer-box">{answer.answer}</pre>
+            <AnswerMarkdown answer={answer.answer} references={answer.references} />
             <section className="reference-section">
               <div className="section-heading compact">
                 <h3>참고 근거</h3>
@@ -120,18 +101,19 @@ export function AskPage() {
                     <article className="reference-card" key={`${reference.sourceUrl ?? reference.title ?? 'reference'}-${index}`}>
                       <div>
                         <span className="route-badge">{reference.type ?? reference.category ?? 'RAG'}</span>
-                        {typeof reference.imported === 'boolean' && (
-                          <span className="tag-pill">{reference.imported ? '새로 저장됨' : reference.reason ?? '이미 저장됨'}</span>
-                        )}
                       </div>
-                      <strong>{reference.title ?? '참고 문서'}</strong>
+                      <strong>[{index + 1}] {reference.title ?? '참고 문서'}</strong>
                       {reference.sectionPath && <small>문서 위치: {reference.sectionPath}</small>}
-                      {reference.sourceUrl && (
-                        <a href={reference.sourceUrl} target="_blank" rel="noreferrer">
+                      {reference.chunkId && <small>근거 chunk: {reference.chunkId}</small>}
+                      {reference.faqId && <Link to={`/faq/${reference.faqId}`}>FAQ 원문 열기</Link>}
+                      {publicUrl(reference.sourceUrl) && (
+                        <a href={publicUrl(reference.sourceUrl)!} target="_blank" rel="noopener noreferrer">
                           출처 열기 <ExternalLink size={14} />
                         </a>
                       )}
-                      <p>{reference.chunkText ?? reference.content ?? reference.snippet ?? '본문을 가져오지 못했거나 이미 저장된 문서입니다.'}</p>
+                      {reference.type !== 'WEB_SEARCH' && (reference.chunkText || reference.content) && (
+                        <p>{reference.chunkText ?? reference.content}</p>
+                      )}
                       {typeof reference.sourceStart === 'number' && typeof reference.sourceEnd === 'number' && (
                         <small>원문 범위: {reference.sourceStart}–{reference.sourceEnd}</small>
                       )}
@@ -145,13 +127,17 @@ export function AskPage() {
                     ? '근거 검색 서비스에 문제가 있어 참고 근거를 표시하지 않았습니다. 잠시 후 다시 시도해 주세요.'
                     : answer.retrievalStatus === 'NO_ACTIVE_INDEX'
                       ? '현재 활성 지식 색인이 없어 참고 근거를 표시하지 않았습니다. 문서 색인 후 다시 시도해 주세요.'
-                    : '아직 표시할 참고 근거가 없습니다. 블로그 자동 검색을 켜고 다시 질문해보세요.'}
+                    : answer.retrievalStatus === 'INSUFFICIENT_EVIDENCE'
+                      ? '답변에 사용할 만큼 충분한 근거를 찾지 못했습니다. 질문을 더 구체적으로 바꿔 다시 시도해보세요.'
+                      : '아직 표시할 참고 근거가 없습니다.'}
                 </p>
               )}
             </section>
-            <button className="secondary-button" type="button" disabled={publishMutation.isPending} onClick={() => publishMutation.mutate()}>
-              <UploadCloud size={17} /> FAQ로 공개
-            </button>
+            {answer.id ? (
+              <button className="secondary-button" type="button" disabled={publishMutation.isPending} onClick={() => publishMutation.mutate()}>
+                <UploadCloud size={17} /> FAQ로 공개
+              </button>
+            ) : <p className="muted-line">이 답변은 저장되지 않아 FAQ로 공개할 수 없습니다.</p>}
             {publishMutation.error && <p className="error-text">{getErrorMessage(publishMutation.error)}</p>}
             {publishMessage && <p className="success-text">{publishMessage}</p>}
           </>

@@ -4,9 +4,12 @@
   "version": "0.1.0",
   "scripts": {
     "build": "nest build",
+    "admin:create": "ts-node scripts/create-admin.ts",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
     "test": "jest --runInBand",
+    "rag:evaluate": "ts-node scripts/evaluate-rag.ts",
+    "rag:collect": "ts-node scripts/collect-rag-retrieval.ts",
     "migration:run": "typeorm-ts-node-commonjs migration:run -d src/database/data-source.ts",
     "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/database/data-source.ts"
   },
@@ -21,6 +24,7 @@
     "bcryptjs": "^2.4.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
+    "js-tiktoken": "1.0.21",
     "pg": "^8.13.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

@@ -31,6 +31,42 @@ export class DocumentChunk {
   @Column({ type: 'vector' as 'text', length: 1536, nullable: true })
   embedding?: number[];
 
+  @Column({ type: 'varchar', nullable: true })
+  embeddingProvider?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  embeddingModel?: string | null;
+
+  @Column({ type: 'integer', nullable: true })
+  embeddingDimension?: number | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  embeddingMode?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  embeddingVersion?: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  embeddingGeneratedAt?: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  indexedAt?: Date | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  indexStatus?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  indexErrorCode?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  chunkingVersion?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  documentTitle?: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  sourceUrl?: string | null;
+
   @Column({ default: 0 })
   tokenCount: number;
 

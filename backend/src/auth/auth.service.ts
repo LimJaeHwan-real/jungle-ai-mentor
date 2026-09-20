@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -7,6 +7,7 @@ import { Repository } from 'typeorm';
 import { User } from '../users/user.entity';
 import { LoginDto } from './dto/login.dto';
 import { SignupDto } from './dto/signup.dto';
+import { isAdminEmail } from './admin-access';
 
 @Injectable()
 export class AuthService {
@@ -17,7 +18,10 @@ export class AuthService {
   ) {}
 
   async signup(dto: SignupDto) {
-    const email = dto.email.toLowerCase();
+    const email = dto.email.trim().toLowerCase();
+    if (isAdminEmail(email, this.config.get<string>('ADMIN_EMAIL_ALLOWLIST'))) {
+      throw new ForbiddenException('이 이메일로는 공개 회원가입을 진행할 수 없습니다.');
+    }
     const existing = await this.users.findOne({ where: { email } });
     if (existing) {
       throw new ConflictException('Email is already registered.');
@@ -73,6 +77,7 @@ export class AuthService {
       id: user.id,
       email: user.email,
       nickname: user.nickname,
+      isAdmin: isAdminEmail(user.email, this.config.get<string>('ADMIN_EMAIL_ALLOWLIST')),
       createdAt: user.createdAt,
     };
   }

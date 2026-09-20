@@ -13,6 +13,7 @@ coverage/
 repo-inspect/
 backend/node_modules/
 backend/dist/
+backend/.rag-evaluation-results/
 frontend/node_modules/
 frontend/dist/
 frontend/vite.config.js

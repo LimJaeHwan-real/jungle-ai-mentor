@@ -29,6 +29,7 @@ describe('RagReindexService', () => {
     const rag = {
       findReindexTargetDocuments: jest.fn(async () => [{ id: 'document-1' }]),
       reindexDocument: jest.fn(async () => undefined),
+      getChunkingVersion: jest.fn(() => 'markdown-cl100k-256-v2'),
     };
     const embeddings = { getMetadata: jest.fn(() => ({ model: 'text-embedding-3-small', mode: 'real', version: 'v1', dimension: 1536 })) };
     return { service: new RagReindexService(jobs as any, items as any, dataSource as any, rag as any, embeddings as any), jobs, items, manager, dataSource, rag };
@@ -40,6 +41,24 @@ describe('RagReindexService', () => {
 
     await expect(service.createJob(['document-1'])).resolves.toMatchObject({ targetCount: 0, duplicateCount: 1 });
     expect(manager.query).toHaveBeenCalledWith(expect.stringContaining('ON CONFLICT ("documentId") WHERE status IN (\'PENDING\', \'RUNNING\') DO NOTHING'), expect.any(Array));
+    expect(manager.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ chunkingVersion: 'markdown-cl100k-256-v2' }));
+  });
+
+  it('PostgreSQL UPDATE 반환 행에서 선점 항목을 꺼내 작업 상태를 RUNNING으로 바꾼다', async () => {
+    const { service, manager } = createService();
+    const claimed = { id: 'item-1', jobId: 'job-1', documentId: 'document-1' };
+    (manager.query as jest.Mock).mockResolvedValueOnce([[claimed], 1]).mockResolvedValueOnce([[], 1]);
+
+    await expect((service as any).claimNextItem()).resolves.toEqual(claimed);
+    expect(manager.query).toHaveBeenNthCalledWith(2, expect.stringContaining("SET status = 'RUNNING'"), ['job-1']);
+  });
+
+  it('대기 항목이 없으면 작업 상태를 갱신하지 않는다', async () => {
+    const { service, manager } = createService();
+    (manager.query as jest.Mock).mockResolvedValueOnce([[], 0]);
+
+    await expect((service as any).claimNextItem()).resolves.toBeUndefined();
+    expect(manager.query).toHaveBeenCalledTimes(1);
   });
 
   it('성공한 항목은 성공으로 완료 처리하고, embedding 실패는 안전한 오류로 기록한다', async () => {
@@ -53,6 +72,33 @@ describe('RagReindexService', () => {
     rag.reindexDocument.mockRejectedValueOnce(new ServiceUnavailableException());
     await (service as any).processItem({ id: 'item-2', jobId: 'job-1', documentId: 'document-1' });
     expect(complete).toHaveBeenCalledWith(expect.any(Object), 'FAILED', 'EMBEDDING_UNAVAILABLE', '임베딩 서비스를 사용할 수 없어 기존 색인을 유지했습니다.');
+  });
+
+  it('임대 연장 대상이 사라지면 재색인을 성공으로 기록하지 않는다', async () => {
+    const { service, dataSource, rag } = createService();
+    let tick: (() => void) | undefined;
+    let finishEmbedding: (() => void) | undefined;
+    const interval = jest.spyOn(global, 'setInterval').mockImplementation(((callback: () => void) => {
+      tick = callback;
+      return 1 as unknown as NodeJS.Timeout;
+    }) as typeof setInterval);
+    const clear = jest.spyOn(global, 'clearInterval').mockImplementation(() => undefined);
+    (rag.reindexDocument as jest.Mock).mockImplementationOnce(() => new Promise<void>((resolve) => { finishEmbedding = resolve; }));
+    (dataSource.query as jest.Mock).mockResolvedValueOnce([[], 0]);
+    const complete = jest.spyOn(service as any, 'completeItem').mockResolvedValue(undefined);
+
+    try {
+      const processing = (service as any).processItem({ id: 'item-1', jobId: 'job-1', documentId: 'document-1' });
+      tick?.();
+      finishEmbedding?.();
+      await processing;
+
+      expect(dataSource.query).toHaveBeenCalledWith(expect.stringContaining('RETURNING id'), ['item-1']);
+      expect(complete).toHaveBeenCalledWith(expect.any(Object), 'FAILED', 'LEASE_RENEWAL_FAILED', '재색인 작업의 임대를 연장하지 못했습니다.');
+    } finally {
+      interval.mockRestore();
+      clear.mockRestore();
+    }
   });
 
   it('완료 집계는 성공·실패 수와 실패 포함 완료 상태를 함께 저장한다', async () => {

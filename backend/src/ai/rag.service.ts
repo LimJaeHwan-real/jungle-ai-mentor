@@ -8,10 +8,13 @@ import { KnowledgeDocument } from './entities/knowledge-document.entity';
 import { EmbeddingService } from './embedding.service';
 import { RagMetricsService } from './rag-metrics.service';
 import { chunkTextFtsExpression, documentTitleFtsExpression } from '../database/fts-expressions';
+import { chunkMarkdown, MarkdownChunk, RAG_CHUNKING_VERSION } from './utils/markdown-chunker';
+import { EvidenceAssessmentService } from './evidence-assessment.service';
 
 export interface RagSearchResult {
   chunkId: string;
   documentId: string;
+  faqId?: string;
   title: string;
   category: string;
   sourceUrl?: string;
@@ -19,6 +22,9 @@ export interface RagSearchResult {
   sectionPath?: string;
   sourceStart?: number;
   sourceEnd?: number;
+  chunkingVersion?: string;
+  embeddingVersion?: string;
+  indexedAt?: Date;
   score: number;
   rerankScore?: number;
 }
@@ -28,6 +34,12 @@ export type RagRetrievalStatus = 'SUFFICIENT_EVIDENCE' | 'INSUFFICIENT_EVIDENCE'
 export interface RagSearchResponse {
   results: RagSearchResult[];
   status: RagRetrievalStatus;
+}
+
+export interface RagCandidateResponse {
+  results: RagSearchResult[];
+  status: 'CANDIDATES_FOUND' | 'INSUFFICIENT_EVIDENCE' | 'NO_ACTIVE_INDEX' | 'SEARCH_DEGRADED';
+  startedAt: number;
 }
 
 export interface RagIndexResult {
@@ -48,13 +60,32 @@ export interface RagReindexTarget {
   embeddingMode?: string;
   embeddingVersion?: string;
   embeddingDimension?: number;
+  chunkingVersion?: string;
   updatedAt: Date;
+}
+
+function chunkCompatibilityPredicate(provider: number, model: number, mode: number, version: number, dimension: number): string {
+  return `(
+    (c."indexStatus" = 'ACTIVE'
+      AND c."embeddingProvider" = $${provider}
+      AND c."embeddingModel" = $${model}
+      AND c."embeddingMode" = $${mode}
+      AND c."embeddingVersion" = $${version}
+      AND c."embeddingDimension" = $${dimension})
+    OR ($${provider} = 'openai' AND $${mode} = 'real'
+      AND d."embeddingProvider" IS NULL
+      AND c."indexStatus" IS NULL
+      AND c."embeddingProvider" IS NULL
+      AND c."embeddingModel" IS NULL
+      AND c."embeddingMode" IS NULL
+      AND c."embeddingVersion" IS NULL
+      AND c."embeddingDimension" IS NULL)
+  )`;
 }
 
 @Injectable()
 export class RagService {
-  private readonly chunkSize = 700;
-  private readonly chunkOverlap = 120;
+  private readonly chunkTokenLimit = 256;
 
   constructor(
     @InjectRepository(KnowledgeDocument) private readonly documents: Repository<KnowledgeDocument>,
@@ -62,17 +93,28 @@ export class RagService {
     private readonly embeddings: EmbeddingService,
     private readonly dataSource: DataSource,
     private readonly metrics: RagMetricsService,
+    private readonly evidenceAssessment: EvidenceAssessmentService,
   ) {}
 
   async createDocument(dto: CreateDocumentDto) {
     return this.indexDocument(dto);
   }
 
-  async indexDocument(dto: CreateDocumentDto, options: { force?: boolean } = {}): Promise<RagIndexResult> {
+  async indexDocument(dto: CreateDocumentDto, options: { force?: boolean; documentId?: string } = {}): Promise<RagIndexResult> {
+    if (dto.sourceType === 'BLOG_SEARCH') throw new BadRequestException('외부 블로그 자료는 색인할 수 없습니다.');
     const contentHash = createHash('sha256').update(dto.content).digest('hex');
-    const existing = dto.sourceUrl ? await this.documents.findOne({ where: { sourceUrl: dto.sourceUrl } }) : undefined;
+    const existing = options.documentId
+      ? await this.documents.findOne({ where: { id: options.documentId } })
+      : dto.sourceUrl ? await this.documents.findOne({ where: { sourceUrl: dto.sourceUrl } }) : undefined;
+    if (existing?.sourceType === 'BLOG_SEARCH') throw new BadRequestException('외부 블로그 자료는 색인할 수 없습니다.');
+    if (options.documentId && !existing) throw new NotFoundException('재색인 대상 문서를 찾을 수 없습니다.');
+    const metadata = this.embeddings.getMetadata();
 
-    if (existing?.contentHash === contentHash && !options.force) {
+    if (existing?.contentHash === contentHash && existing.indexStatus === 'ACTIVE'
+      && existing.embeddingProvider === metadata.provider && existing.embeddingModel === metadata.model
+      && existing.embeddingMode === metadata.mode && existing.embeddingVersion === metadata.version
+      && existing.embeddingDimension === metadata.dimension
+      && existing.chunkingVersion === RAG_CHUNKING_VERSION && !options.force) {
       const chunkCount = await this.chunks.count({ where: { documentId: existing.id } });
       const result: RagIndexResult = {
         id: existing.id,
@@ -88,16 +130,23 @@ export class RagService {
 
     const texts = this.splitText(dto.content);
     if (!texts.length) throw new BadRequestException('색인할 수 있는 문서 내용이 없습니다.');
-    let vectors: number[][];
+    let vectors: Array<{ embedding: number[]; generatedAt: Date }>;
     try {
-      vectors = await Promise.all(texts.map((chunk) => this.embeddings.embed(chunk.chunkText)));
+      vectors = await Promise.all(texts.map(async (chunk) => ({
+        embedding: await this.embeddings.embed(chunk.chunkText),
+        generatedAt: new Date(),
+      })));
     } catch (error) {
-      if (!existing) await this.documents.save(this.documents.create({ title: dto.title, content: dto.content, category: dto.category ?? 'GENERAL', sourceType: dto.sourceType ?? 'ADMIN', sourceUrl: dto.sourceUrl, contentHash, indexStatus: 'FAILED' }));
+      if (existing) {
+        await this.documents.update(existing.id, { indexErrorCode: 'EMBEDDING_UNAVAILABLE' });
+      } else {
+        await this.documents.save(this.documents.create({ title: dto.title, content: dto.content, category: dto.category ?? 'GENERAL', sourceType: dto.sourceType ?? 'ADMIN', sourceUrl: dto.sourceUrl, contentHash, indexStatus: 'FAILED', indexErrorCode: 'EMBEDDING_UNAVAILABLE' }));
+      }
       this.metrics.recordIndex('failed');
       throw error;
     }
-    const metadata = this.embeddings.getMetadata();
     const document = existing ?? this.documents.create();
+    const indexedAt = new Date();
     Object.assign(document, {
         title: dto.title,
         content: dto.content,
@@ -105,7 +154,11 @@ export class RagService {
         sourceType: dto.sourceType ?? 'ADMIN',
         sourceUrl: dto.sourceUrl,
         contentHash,
-        indexStatus: 'ACTIVE', embeddingModel: metadata.model, embeddingMode: metadata.mode, embeddingVersion: metadata.version, embeddingDimension: metadata.dimension,
+        indexStatus: 'ACTIVE', indexErrorCode: null, indexedAt,
+        embeddingProvider: metadata.provider, embeddingModel: metadata.model, embeddingMode: metadata.mode,
+        embeddingVersion: metadata.version, embeddingDimension: metadata.dimension,
+        embeddingGeneratedAt: new Date(Math.max(...vectors.map((vector) => vector.generatedAt.getTime()))),
+        chunkingVersion: RAG_CHUNKING_VERSION,
     });
     const savedDocument = await this.dataSource.transaction(async (manager) => {
       const saved = await manager.save(KnowledgeDocument, document);
@@ -118,8 +171,20 @@ export class RagService {
           sectionPath: chunk.sectionPath,
           sourceStart: chunk.sourceStart,
           sourceEnd: chunk.sourceEnd,
-          tokenCount: Math.ceil(chunk.chunkText.length / 4),
-          embedding: vectors[index],
+          tokenCount: chunk.tokenCount,
+          embedding: vectors[index].embedding,
+          embeddingProvider: metadata.provider,
+          embeddingModel: metadata.model,
+          embeddingDimension: metadata.dimension,
+          embeddingMode: metadata.mode,
+          embeddingVersion: metadata.version,
+          embeddingGeneratedAt: vectors[index].generatedAt,
+          indexedAt,
+          indexStatus: 'ACTIVE',
+          indexErrorCode: null,
+          chunkingVersion: RAG_CHUNKING_VERSION,
+          documentTitle: dto.title,
+          sourceUrl: dto.sourceUrl ?? null,
         }),
       );
       await manager.save(DocumentChunk, chunks);
@@ -141,6 +206,7 @@ export class RagService {
   async reindexDocument(documentId: string): Promise<RagIndexResult> {
     const document = await this.documents.findOne({ where: { id: documentId } });
     if (!document) throw new NotFoundException('재색인 대상 문서를 찾을 수 없습니다.');
+    if (document.sourceType === 'BLOG_SEARCH') throw new BadRequestException('외부 블로그 자료는 재색인할 수 없습니다.');
     return this.indexDocument(
       {
         title: document.title,
@@ -149,18 +215,40 @@ export class RagService {
         sourceType: document.sourceType,
         sourceUrl: document.sourceUrl,
       },
-      { force: true },
+      { force: true, documentId: document.id },
     );
   }
+
+  getChunkingVersion() { return RAG_CHUNKING_VERSION; }
 
   async search(question: string, limit = 4): Promise<RagSearchResult[]> {
     return (await this.searchWithStatus(question, limit)).results;
   }
 
-  async searchWithStatus(question: string, limit = 4): Promise<RagSearchResponse> {
+  async searchWithStatus(question: string, limit = 4, extraCandidates: RagSearchResult[] = []): Promise<RagSearchResponse> {
+    return this.assessCandidates(question, await this.searchCandidatesWithStatus(question, limit), extraCandidates);
+  }
+
+  async searchCandidatesWithStatus(question: string, limit = 4): Promise<RagCandidateResponse> {
     const startedAt = Date.now();
     try {
       const embedding = await this.embeddings.embed(question);
+      return await this.searchCandidatesForEmbedding(question, embedding, limit, startedAt);
+    } catch {
+      return this.degradedCandidates(question, limit, startedAt);
+    }
+  }
+
+  async searchCandidatesWithEmbedding(question: string, embedding: number[], limit = 4): Promise<RagCandidateResponse> {
+    const startedAt = Date.now();
+    try {
+      return await this.searchCandidatesForEmbedding(question, embedding, limit, startedAt);
+    } catch {
+      return this.degradedCandidates(question, limit, startedAt);
+    }
+  }
+
+  private async searchCandidatesForEmbedding(question: string, embedding: number[], limit: number, startedAt: number): Promise<RagCandidateResponse> {
       const vector = this.embeddings.toSqlVector(embedding);
       const metadata = this.embeddings.getMetadata();
       const rows = (await this.chunks.query(
@@ -175,34 +263,60 @@ export class RagService {
           c."sectionPath" AS "sectionPath",
           c."sourceStart" AS "sourceStart",
           c."sourceEnd" AS "sourceEnd",
+          c."chunkingVersion" AS "chunkingVersion",
+          c."embeddingVersion" AS "embeddingVersion",
+          c."indexedAt" AS "indexedAt",
           1 - (c.embedding <=> $1::vector) AS score
         FROM document_chunks c
         INNER JOIN documents d ON d.id = c."documentId"
         WHERE c.embedding IS NOT NULL
           AND d."indexStatus" = 'ACTIVE'
+          AND d."sourceType" != 'BLOG_SEARCH'
           AND d."embeddingModel" = $3
           AND d."embeddingMode" = $4
           AND d."embeddingVersion" = $5
           AND d."embeddingDimension" = $6
+          AND (d."embeddingProvider" = $7 OR ($7 = 'openai' AND $4 = 'real' AND d."embeddingProvider" IS NULL))
+          AND ${chunkCompatibilityPredicate(7, 3, 4, 5, 6)}
         ORDER BY c.embedding <=> $1::vector
         LIMIT $2
         `,
-        [vector, limit, metadata.model, metadata.mode, metadata.version, metadata.dimension],
-      )) as RagSearchResult[];
+        [vector, limit, metadata.model, metadata.mode, metadata.version, metadata.dimension, metadata.provider],
+      ).catch((error) => {
+        this.metrics.recordRetrievalFailure('vector');
+        throw error;
+      })) as RagSearchResult[];
       const lexicalRows = await this.lexicalSearch(question, limit);
       const results = this.rerankResults(question, this.mergeSearchResults(rows, lexicalRows, limit));
-      const status = this.hasSufficientEvidence(results)
-        ? 'SUFFICIENT_EVIDENCE'
-        : results.length === 0 && !(await this.hasCompatibleActiveIndex(metadata))
-          ? 'NO_ACTIVE_INDEX'
-          : 'INSUFFICIENT_EVIDENCE';
-      return this.completeSearch({ results, status }, startedAt);
+      this.metrics.recordRetrievalCandidates(rows.length, lexicalRows.length, results.length);
+      const status = results.length > 0 ? 'CANDIDATES_FOUND'
+        : await this.hasCompatibleActiveIndex(metadata) ? 'INSUFFICIENT_EVIDENCE' : 'NO_ACTIVE_INDEX';
+      return { results, status, startedAt };
+  }
+
+  private async degradedCandidates(question: string, limit: number, startedAt: number): Promise<RagCandidateResponse> {
+    try {
+      return { results: await this.lexicalSearch(question, limit), status: 'SEARCH_DEGRADED', startedAt };
     } catch {
-      try {
-        return this.completeSearch({ results: await this.lexicalSearch(question, limit), status: 'SEARCH_DEGRADED' }, startedAt);
-      } catch {
-        return this.completeSearch({ results: [], status: 'SEARCH_DEGRADED' }, startedAt);
-      }
+      return { results: [], status: 'SEARCH_DEGRADED', startedAt };
+    }
+  }
+
+  async assessCandidates(question: string, candidates: RagCandidateResponse, extraCandidates: RagSearchResult[] = []): Promise<RagSearchResponse> {
+    if (candidates.status === 'NO_ACTIVE_INDEX' || candidates.status === 'SEARCH_DEGRADED') {
+      return this.completeSearch({ results: candidates.results, status: candidates.status }, candidates.startedAt);
+    }
+    const combined = [...candidates.results, ...extraCandidates];
+    if (combined.length === 0) {
+      return this.completeSearch({ results: [], status: 'INSUFFICIENT_EVIDENCE' }, candidates.startedAt);
+    }
+    try {
+      const supportingIds = new Set(await this.evidenceAssessment.assess(question, combined));
+      const results = combined.filter((result) => supportingIds.has(result.chunkId));
+      const status = results.length > 0 ? 'SUFFICIENT_EVIDENCE' : 'INSUFFICIENT_EVIDENCE';
+      return this.completeSearch({ results, status }, candidates.startedAt);
+    } catch {
+      return this.completeSearch({ results: [], status: 'SEARCH_DEGRADED' }, candidates.startedAt);
     }
   }
 
@@ -210,7 +324,7 @@ export class RagService {
     const expectedEmbedding = this.embeddings.getMetadata();
     const documents = await this.reindexTargetQuery().take(limit).getMany();
 
-    return { expectedEmbedding, count: documents.length, documents: documents.map((document) => this.toReindexTarget(document)) };
+    return { expectedEmbedding, expectedChunkingVersion: RAG_CHUNKING_VERSION, count: documents.length, documents: documents.map((document) => this.toReindexTarget(document)) };
   }
 
   async findReindexTargetDocuments(documentIds?: string[]) {
@@ -220,6 +334,7 @@ export class RagService {
   }
 
   private async lexicalSearch(question: string, limit: number, category?: string): Promise<RagSearchResult[]> {
+    const metadata = this.embeddings.getMetadata();
     const rows = (await this.chunks.query(
       `
       WITH query AS (
@@ -235,11 +350,22 @@ export class RagService {
           c."sectionPath" AS "sectionPath",
           c."sourceStart" AS "sourceStart",
           c."sourceEnd" AS "sourceEnd",
+          c."chunkingVersion" AS "chunkingVersion",
+          c."embeddingVersion" AS "embeddingVersion",
+          c."indexedAt" AS "indexedAt",
           ts_rank_cd(${chunkTextFtsExpression('c')}, query.value) AS score
         FROM document_chunks c
         INNER JOIN documents d ON d.id = c."documentId"
         CROSS JOIN query
-        WHERE d."indexStatus" = 'ACTIVE'
+        WHERE c.embedding IS NOT NULL
+          AND d."indexStatus" = 'ACTIVE'
+          AND d."sourceType" != 'BLOG_SEARCH'
+          AND (d."embeddingProvider" = $4 OR ($4 = 'openai' AND $6 = 'real' AND d."embeddingProvider" IS NULL))
+          AND d."embeddingModel" = $5
+          AND d."embeddingMode" = $6
+          AND d."embeddingVersion" = $7
+          AND d."embeddingDimension" = $8
+          AND ${chunkCompatibilityPredicate(4, 5, 6, 7, 8)}
           AND ${chunkTextFtsExpression('c')} @@ query.value
           AND ($3::text IS NULL OR d.category = $3)
 
@@ -255,11 +381,22 @@ export class RagService {
           c."sectionPath" AS "sectionPath",
           c."sourceStart" AS "sourceStart",
           c."sourceEnd" AS "sourceEnd",
+          c."chunkingVersion" AS "chunkingVersion",
+          c."embeddingVersion" AS "embeddingVersion",
+          c."indexedAt" AS "indexedAt",
           ts_rank_cd(${documentTitleFtsExpression('d')}, query.value) AS score
         FROM document_chunks c
         INNER JOIN documents d ON d.id = c."documentId"
         CROSS JOIN query
-        WHERE d."indexStatus" = 'ACTIVE'
+        WHERE c.embedding IS NOT NULL
+          AND d."indexStatus" = 'ACTIVE'
+          AND d."sourceType" != 'BLOG_SEARCH'
+          AND (d."embeddingProvider" = $4 OR ($4 = 'openai' AND $6 = 'real' AND d."embeddingProvider" IS NULL))
+          AND d."embeddingModel" = $5
+          AND d."embeddingMode" = $6
+          AND d."embeddingVersion" = $7
+          AND d."embeddingDimension" = $8
+          AND ${chunkCompatibilityPredicate(4, 5, 6, 7, 8)}
           AND ${documentTitleFtsExpression('d')} @@ query.value
           AND ($3::text IS NULL OR d.category = $3)
       )
@@ -272,8 +409,11 @@ export class RagService {
       ORDER BY score DESC
       LIMIT $2
       `,
-      [question, limit, category ?? null],
-    )) as RagSearchResult[];
+      [question, limit, category ?? null, metadata.provider, metadata.model, metadata.mode, metadata.version, metadata.dimension],
+    ).catch((error) => {
+      this.metrics.recordRetrievalFailure('lexical');
+      throw error;
+    })) as RagSearchResult[];
     return rows.sort((a, b) => b.score - a.score);
   }
 
@@ -323,20 +463,24 @@ export class RagService {
       .sort((a, b) => (b.rerankScore ?? 0) - (a.rerankScore ?? 0) || b.score - a.score);
   }
 
-  private hasSufficientEvidence(results: RagSearchResult[]) {
-    return results.length > 0 && (results[0]?.score ?? 0) >= 1 / 61;
-  }
-
   private async hasCompatibleActiveIndex(metadata: ReturnType<EmbeddingService['getMetadata']>) {
-    return (await this.documents.count({
-      where: {
-        indexStatus: 'ACTIVE',
-        embeddingModel: metadata.model,
-        embeddingMode: metadata.mode,
-        embeddingVersion: metadata.version,
-        embeddingDimension: metadata.dimension,
-      },
-    })) > 0;
+    const rows = await this.chunks.query(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM document_chunks c
+        INNER JOIN documents d ON d.id = c."documentId"
+        WHERE c.embedding IS NOT NULL
+          AND d."indexStatus" = 'ACTIVE'
+          AND d."sourceType" != 'BLOG_SEARCH'
+          AND d."embeddingModel" = $2
+          AND d."embeddingMode" = $3
+          AND d."embeddingVersion" = $4
+          AND d."embeddingDimension" = $5
+          AND (d."embeddingProvider" = $1 OR ($1 = 'openai' AND $3 = 'real' AND d."embeddingProvider" IS NULL))
+          AND ${chunkCompatibilityPredicate(1, 2, 3, 4, 5)}
+      ) AS "exists"
+    `, [metadata.provider, metadata.model, metadata.mode, metadata.version, metadata.dimension]);
+    return rows[0]?.exists === true;
   }
 
   private queryTerms(question: string) {
@@ -369,6 +513,7 @@ export class RagService {
       embeddingMode: document.embeddingMode,
       embeddingVersion: document.embeddingVersion,
       embeddingDimension: document.embeddingDimension,
+      chunkingVersion: document.chunkingVersion ?? undefined,
       updatedAt: document.updatedAt,
     };
   }
@@ -381,68 +526,38 @@ export class RagService {
         new Brackets((query) => {
           query
             .where('document."indexStatus" != :active', { active: 'ACTIVE' })
+            .orWhere('document."embeddingProvider" IS NULL')
             .orWhere('document."embeddingModel" IS NULL')
             .orWhere('document."embeddingMode" IS NULL')
             .orWhere('document."embeddingVersion" IS NULL')
             .orWhere('document."embeddingDimension" IS NULL')
+            .orWhere('document."chunkingVersion" IS NULL')
             .orWhere('document."embeddingModel" != :model', { model: expectedEmbedding.model })
+            .orWhere('document."embeddingProvider" != :provider', { provider: expectedEmbedding.provider })
             .orWhere('document."embeddingMode" != :mode', { mode: expectedEmbedding.mode })
             .orWhere('document."embeddingVersion" != :version', { version: expectedEmbedding.version })
-            .orWhere('document."embeddingDimension" != :dimension', { dimension: expectedEmbedding.dimension });
+            .orWhere('document."embeddingDimension" != :dimension', { dimension: expectedEmbedding.dimension })
+            .orWhere('document."chunkingVersion" != :chunkingVersion', { chunkingVersion: RAG_CHUNKING_VERSION })
+            .orWhere('NOT EXISTS (SELECT 1 FROM document_chunks c WHERE c."documentId" = document.id)')
+            .orWhere(`EXISTS (
+              SELECT 1 FROM document_chunks c
+              WHERE c."documentId" = document.id
+                AND (c.embedding IS NULL
+                  OR c."indexStatus" IS DISTINCT FROM :active
+                  OR c."embeddingProvider" IS DISTINCT FROM :provider
+                  OR c."embeddingModel" IS DISTINCT FROM :model
+                  OR c."embeddingMode" IS DISTINCT FROM :mode
+                  OR c."embeddingVersion" IS DISTINCT FROM :version
+                  OR c."embeddingDimension" IS DISTINCT FROM :dimension
+                  OR c."chunkingVersion" IS DISTINCT FROM :chunkingVersion)
+            )`);
         }),
       )
+      .andWhere('document."sourceType" != :excludedSourceType', { excludedSourceType: 'BLOG_SEARCH' })
       .orderBy('document.updatedAt', 'DESC');
   }
 
-  splitText(content: string): Array<{ chunkText: string; sectionPath?: string; sourceStart: number; sourceEnd: number }> {
-    const normalized = content.replace(/\r\n/g, '\n').trim();
-    if (!normalized) return [];
-
-    const chunks: Array<{ chunkText: string; sectionPath?: string; sourceStart: number; sourceEnd: number }> = [];
-    const headingStarts = [...normalized.matchAll(/^#{1,6}\s+.+$/gm)].map((heading) => heading.index ?? 0);
-    const boundaries = [...new Set([0, ...headingStarts, normalized.length])].sort((a, b) => a - b);
-
-    for (let boundary = 0; boundary < boundaries.length - 1; boundary += 1) {
-      const rangeStart = boundaries[boundary];
-      const rangeEnd = boundaries[boundary + 1];
-      let start = rangeStart;
-      while (start < rangeEnd) {
-        const hardEnd = Math.min(start + this.chunkSize, rangeEnd);
-        const slice = normalized.slice(start, hardEnd);
-        const paragraphBreak = slice.lastIndexOf('\n\n');
-        const sentenceBreak = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf('! '), slice.lastIndexOf('? '));
-        const candidate =
-          paragraphBreak > this.chunkSize * 0.45
-            ? paragraphBreak
-            : sentenceBreak > this.chunkSize * 0.45
-              ? sentenceBreak + 1
-              : slice.length;
-        const softEnd = hardEnd === rangeEnd ? hardEnd : start + candidate;
-        const chunkText = normalized.slice(start, softEnd).trim();
-        if (chunkText) chunks.push({ chunkText, sectionPath: this.sectionPathAt(normalized, start), sourceStart: start, sourceEnd: softEnd });
-        if (softEnd >= rangeEnd) break;
-        start = Math.max(softEnd - this.chunkOverlap, start + 1);
-      }
-    }
-
-    const seen = new Set<string>();
-    return chunks.filter((chunk) => {
-      const key = chunk.chunkText.replace(/\s+/g, ' ').trim();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }
-
-  private sectionPathAt(content: string, position: number) {
-    const headings = [...content.matchAll(/^(#{1,6})\s+(.+)$/gm)].filter((heading) => (heading.index ?? 0) <= position);
-    if (!headings.length) return undefined;
-    const path: string[] = [];
-    for (const heading of headings) {
-      const level = heading[1].length;
-      path.splice(level - 1);
-      path[level - 1] = heading[2].trim();
-    }
-    return path.filter(Boolean).join(' > ');
+  splitText(content: string): MarkdownChunk[] {
+    return chunkMarkdown(content, this.chunkTokenLimit ?? 256);
   }
 }

@@ -1,10 +1,11 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ListFaqDto } from './dto/list-faq.dto';
 import { PublishFaqDto } from './dto/publish-faq.dto';
 import { AiQuestion } from './entities/ai-question.entity';
 import { Faq } from './entities/faq.entity';
+import type { RagSearchResult } from './rag.service';
 
 @Injectable()
 export class FaqService {
@@ -17,6 +18,9 @@ export class FaqService {
     const question = await this.questions.findOne({ where: { id: questionId } });
     if (!question) {
       throw new NotFoundException('AI question not found.');
+    }
+    if (question.usedTools?.some((tool) => ['BLOG_SEARCH_TOOL', 'WEB_SEARCH_TOOL', 'GITHUB_MCP_TOOL'].includes(tool))) {
+      throw new ForbiddenException('외부 자료를 사용한 답변은 FAQ로 공개할 수 없습니다.');
     }
 
     const existing = await this.faqs.findOne({ where: { aiQuestionId: questionId } });
@@ -79,21 +83,44 @@ export class FaqService {
     return this.serialize(faq);
   }
 
-  async searchForAgent(keyword: string, limit = 3) {
-    const qb = this.faqs
-      .createQueryBuilder('faq')
-      .where('(faq.title ILIKE :keyword OR faq.question ILIKE :keyword OR faq.answer ILIKE :keyword)', {
-        keyword: `%${keyword}%`,
-      })
-      .orderBy('faq.viewCount', 'DESC')
-      .take(limit);
+  async searchForAgent(keyword: string, limit = 3): Promise<RagSearchResult[]> {
+    const terms = [...new Set(keyword.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').split(/\s+/)
+      .filter((term) => term.length >= 2))].slice(0, 8);
+    if (terms.length === 0) return [];
 
-    const faqs = await qb.getMany();
-    return faqs.map((faq) => ({
-      title: faq.title,
-      content: `${faq.question}\n${faq.answer}`,
-      category: faq.category,
-    }));
+    const termClauses = terms.map((_, index) =>
+      `(faq.title ILIKE :faqTerm${index} OR faq.question ILIKE :faqTerm${index} OR faq.answer ILIKE :faqTerm${index})`);
+    const relevanceSql = termClauses.map((clause) => `(CASE WHEN ${clause} THEN 1 ELSE 0 END)`).join(' + ');
+    const params = Object.fromEntries(terms.map((term, index) => [`faqTerm${index}`, `%${term}%`]));
+    const faqs = await this.faqs.createQueryBuilder('faq')
+      .innerJoinAndSelect('faq.aiQuestion', 'question')
+      .where(`question."agentState" ->> 'trustedInternalEvidence' = 'true'`)
+      .andWhere(`NOT (question."usedTools" ?| ARRAY['BLOG_SEARCH_TOOL', 'WEB_SEARCH_TOOL', 'GITHUB_MCP_TOOL']::text[])`)
+      .andWhere(`(${termClauses.join(' OR ')})`, params)
+      .addSelect(relevanceSql, 'faq_relevance')
+      .orderBy('faq_relevance', 'DESC')
+      .addOrderBy('faq.viewCount', 'DESC')
+      .take(20)
+      .getMany();
+
+    return faqs
+      .filter((faq) => faq.aiQuestion?.agentState?.trustedInternalEvidence === true
+        && !faq.aiQuestion.usedTools?.some((tool) => ['BLOG_SEARCH_TOOL', 'WEB_SEARCH_TOOL', 'GITHUB_MCP_TOOL'].includes(tool)))
+      .map((faq) => {
+        const chunkText = `${faq.question}\n${faq.answer}`;
+        const searchable = `${faq.title} ${chunkText}`.toLowerCase();
+        return {
+          faqId: faq.id,
+          chunkId: `faq:${faq.id}`,
+          documentId: `faq:${faq.id}`,
+          title: faq.title,
+          chunkText,
+          category: 'FAQ',
+          score: terms.filter((term) => searchable.includes(term)).length / terms.length,
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
   }
 
   private toTitle(question: string) {
@@ -114,4 +141,3 @@ export class FaqService {
     };
   }
 }
-

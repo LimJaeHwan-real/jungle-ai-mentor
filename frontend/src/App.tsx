@@ -1,5 +1,5 @@
 import { Navigate, NavLink, Route, Routes } from 'react-router-dom';
-import { Bot, FileQuestion, Home, LogIn, LogOut, PenSquare, Plus, UserPlus } from 'lucide-react';
+import { Activity, Bot, FileQuestion, Home, LogIn, LogOut, PenSquare, Plus, UserPlus } from 'lucide-react';
 import { useAuth } from './state/AuthContext';
 import { AskPage } from './pages/AskPage';
 import { FaqDetailPage } from './pages/FaqDetailPage';
@@ -10,12 +10,21 @@ import { PostDetailPage } from './pages/PostDetailPage';
 import { PostEditorPage } from './pages/PostEditorPage';
 import { PostsPage } from './pages/PostsPage';
 import { SignupPage } from './pages/SignupPage';
+import { AdminRagPage } from './pages/AdminRagPage';
 
 function ProtectedRoute({ children }: { children: JSX.Element }) {
   const { token } = useAuth();
   if (!token) {
     return <Navigate to="/login" replace />;
   }
+  return children;
+}
+
+function AdminRoute({ children }: { children: JSX.Element }) {
+  const { token, user } = useAuth();
+  if (!token) return <Navigate to="/login" replace />;
+  if (!user) return <p className="loading">운영자 권한을 확인하는 중입니다.</p>;
+  if (!user.isAdmin) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -45,6 +54,7 @@ export function App() {
           <NavLink to="/faq">
             <FileQuestion size={17} /> FAQ
           </NavLink>
+          {user?.isAdmin && <NavLink to="/admin/rag"><Activity size={17} /> RAG 운영</NavLink>}
         </nav>
         <div className="header-actions">
           {token ? (
@@ -113,6 +123,7 @@ export function App() {
           />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
+          <Route path="/admin/rag" element={<AdminRoute><AdminRagPage /></AdminRoute>} />
         </Routes>
       </main>
     </div>

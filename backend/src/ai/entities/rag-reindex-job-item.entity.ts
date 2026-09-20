@@ -10,25 +10,25 @@ export class RagReindexJobItem {
   @Column()
   jobId: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'uuid', nullable: true })
   documentId?: string | null;
 
   @Column({ default: 'PENDING' })
   status: RagReindexJobItemStatus;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   errorCode?: string | null;
 
   @Column({ type: 'text', nullable: true })
   errorMessage?: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   startedAt?: Date | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   finishedAt?: Date | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   leaseUntil?: Date | null;
 
   @CreateDateColumn()

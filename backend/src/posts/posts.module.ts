@@ -5,6 +5,7 @@ import { KnowledgeDocument } from '../ai/entities/knowledge-document.entity';
 import { EmbeddingService } from '../ai/embedding.service';
 import { RagService } from '../ai/rag.service';
 import { RagMetricsService } from '../ai/rag-metrics.service';
+import { EvidenceAssessmentService } from '../ai/evidence-assessment.service';
 import { AuthModule } from '../auth/auth.module';
 import { User } from '../users/user.entity';
 import { Comment } from './entities/comment.entity';
@@ -16,6 +17,6 @@ import { PostsService } from './posts.service';
 @Module({
   imports: [TypeOrmModule.forFeature([Post, Comment, Tag, User, KnowledgeDocument, DocumentChunk]), AuthModule],
   controllers: [PostsController],
-  providers: [PostsService, RagService, RagMetricsService, EmbeddingService],
+  providers: [PostsService, RagService, RagMetricsService, EmbeddingService, EvidenceAssessmentService],
 })
 export class PostsModule {}
